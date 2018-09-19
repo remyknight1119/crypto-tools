@@ -21,7 +21,7 @@
  */
 #define ct_container_of(ptr, type, member) ({          \
         const typeof( ((type *)0)->member ) *__mptr = (ptr);    \
-        (type *)( (char *)__mptr - offsetof(type,member) );})
+        (type *)( (char *)__mptr - ct_offsetof(type,member) );})
 
 #define CT_ARRAY_SIZE(array)    (sizeof(array)/sizeof(array[0]))
 

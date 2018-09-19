@@ -12,6 +12,7 @@
 
 #include "lib.h"
 #include "tool.h"
+#include "proto.h"
 
 static const char *
 ct_program_version = "1.0.0";//PACKAGE_STRING;
@@ -110,6 +111,8 @@ main(int argc, char **argv)
         fprintf(stderr, "Please input the key file by -k\n");
         return 1;
     }
+
+    proto_init();
 
     ret = ct_decrypt_file(output, input, key, random, filter);
     if (ret != 0) {
