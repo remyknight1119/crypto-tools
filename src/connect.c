@@ -3,9 +3,10 @@
 #include <assert.h>
 
 #include "connect.h"
+#include "log.h"
 
 connection_t *
-connection_find(connection_key_t key, struct list_head *head)
+connection_find(connection_key_t key, int *client, struct list_head *head)
 {
     struct list_head    *pos = NULL;
     connection_t        *conn = NULL;
@@ -18,8 +19,16 @@ connection_find(connection_key_t key, struct list_head *head)
 
     list_for_each(pos, head) {
         conn = list_entry(pos, connection_t, ct_list);
-        if (memcmp(&conn->ct_key, &key, sizeof(key)) == 0 ||
-                memcpy(&conn->ct_key, &reverse, sizeof(reverse)) == 0) {
+        if (memcmp(&conn->ct_key, &key, sizeof(key)) == 0) {
+            if (client != NULL) {
+                *client = 1;
+            }
+            return conn;
+        }
+        if (memcmp(&conn->ct_key, &reverse, sizeof(reverse)) == 0) {
+            if (client != NULL) {
+                *client = 0;
+            }
             return conn;
         }
     }

@@ -14,6 +14,7 @@ void
 ipv4_handler(void *header)
 {
     struct iphdr            *ip = header;
+    uint16_t                hlen = 0;
     ipv4_next_proto_handler handler = NULL;
 
     if (ip->protocol >= NEXT_PROTO_MAX) {
@@ -26,7 +27,8 @@ ipv4_handler(void *header)
         return;
     }
 
-    handler(ip->daddr, ip->saddr, ((char *)ip + ip->ihl*4));
+    hlen = ip->ihl*4;
+    handler(ip->daddr, ip->saddr, (char *)ip + hlen, ntohs(ip->tot_len) - hlen);
 }
 
 void

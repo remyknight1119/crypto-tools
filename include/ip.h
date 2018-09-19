@@ -11,7 +11,7 @@ typedef struct _ip_addr_t {
 } ip_addr_t;
 
 typedef void (*ipv4_next_proto_handler)(uint32_t daddr, uint32_t saddr,
-            void *proto_header);
+            void *proto_header, uint16_t len);
 
 extern void ipv4_handler(void *header);
 extern void ipv4_proto_register(ipv4_next_proto_handler handler,

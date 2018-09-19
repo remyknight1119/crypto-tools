@@ -10,19 +10,19 @@
 LIST_HEAD(tcp_conn_list);
 
 tcp_conn_t *
-tcp_conn_find(connection_key_t key)
+tcp_conn_find(connection_key_t key, int *client)
 {
-    connection_t    *conn = connection_find(key, &tcp_conn_list);
+    connection_t    *conn = connection_find(key, client, &tcp_conn_list);
 
     return (tcp_conn_t *)conn;
 }
 
 tcp_conn_t *
-tcp_conn_alloc(void)
+tcp_conn_alloc(size_t size)
 {
     connection_t    *conn = NULL;
 
-    conn = connection_alloc(sizeof(tcp_conn_t), &tcp_conn_list);
+    conn = connection_alloc(size, &tcp_conn_list);
     return (tcp_conn_t *)conn;
 }
 
