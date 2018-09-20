@@ -46,11 +46,11 @@ loop_callback(u_char *args, const struct pcap_pkthdr *header,
     uint16_t                type = 0;
     static int count = 0;
 
+    packet_count++;
     eth = (void *)packet;
     type = ntohs(eth->ether_type);
     handler = proto_find_handler(type);
     count++;
-    fprintf(stdout, "count = %d\n", count);
     if (handler == NULL) {
         fprintf(stdout, "No handler for eth type = %x\n", type);
         return;

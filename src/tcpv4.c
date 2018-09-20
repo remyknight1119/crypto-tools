@@ -83,11 +83,17 @@ tcp_v4_handler(uint32_t daddr, uint32_t saddr, void *proto_header, uint16_t len)
     hlen = th->doff * 4;
     plen = len - hlen;
     if (plen > 0) {
-        ssl_msg_proc((connection_t *)conn, (char *)proto_header + hlen, plen);
+        ssl_msg_proc((connection_t *)conn, (char *)proto_header + hlen,
+                plen, client);
         CT_LOG("%s: ", client?"client":"server");
         conn_key_print(key);
-        CT_LOG("len = %d\n", len - hlen);
+        //CT_LOG("len = %d\n", len - hlen);
     }
     tcp_statm(th, conn, client);
 }
 
+void
+tcp_v4_init(void)
+{
+    ssl_init();
+}

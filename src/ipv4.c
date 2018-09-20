@@ -45,4 +45,5 @@ void
 ipv4_init(void)
 {
     ipv4_proto_register(tcp_v4_handler, IPPROTO_TCP);
+    tcp_v4_init();
 }

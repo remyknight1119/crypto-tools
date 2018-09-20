@@ -5,9 +5,10 @@
 
 #define CT_LOG(format, ...) \
     do { \
-        fprintf(stdout, "[%s, %d]: "format, __FUNCTION__, \
+        fprintf(stdout, "[%u][%s, %d]: "format, packet_count,  __FUNCTION__, \
                 __LINE__, ##__VA_ARGS__); \
     } while (0)
 
+extern int packet_count;
 
 #endif

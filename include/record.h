@@ -1,6 +1,7 @@
 #ifndef __CT_RECORD_H__
 #define __CT_RECORD_H__
 
+#include <string.h>
 #include <netinet/in.h>
 
 #define RANDOM_BYTE_LEN     28
@@ -28,9 +29,18 @@ typedef struct _client_hello_t {
     random_t        ch_random;
 } client_hello_t;
 
-struct _ssl_conn_t;
+static inline uint32_t get_len_3byte(uint8_t *len)
+{
+    union {
+        uint32_t    len32;
+        uint8_t     len8[4];
+    } mlen;
 
-extern int ssl_handshake_proc(struct _ssl_conn_t *conn, void *data,
-            uint16_t len);
+    mlen.len8[0] = 0;
+    memcpy(&mlen.len8[1], len, 3*sizeof(*len));
+
+    return mlen.len32;
+}
+
 
 #endif

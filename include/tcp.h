@@ -20,5 +20,6 @@ extern void tcp_v4_handler(uint32_t daddr, uint32_t saddr,
 extern tcp_conn_t *tcp_conn_find(connection_key_t key, int *client);
 extern tcp_conn_t *tcp_conn_alloc(size_t size);
 extern void tcp_conn_free(tcp_conn_t *conn);
+extern void tcp_v4_init(void);
 
 #endif
