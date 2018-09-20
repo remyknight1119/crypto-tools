@@ -54,15 +54,33 @@ tls1_2_hello_request(ssl_conn_t *conn, void *data, uint16_t len, int client)
 static int
 tls1_2_client_hello(ssl_conn_t *conn, void *data, uint16_t len, int client)
 {
+    client_hello_t      *h = data;
+
+    assert(len >= sizeof(*h));
+    memcpy(conn->sc_client_random, h->ch_random.rm_random_bytes,
+            sizeof(conn->sc_client_random));
+
     return 0;
 }
 
 static int
 tls1_2_server_hello(ssl_conn_t *conn, void *data, uint16_t len, int client)
 {
+    server_hello_t      *h = data;
+    uint8_t             *p = NULL;
+
+    assert(len >= sizeof(*h));
+    memcpy(conn->sc_server_random, h->sh_random.rm_random_bytes,
+            sizeof(conn->sc_server_random));
+    CT_LOG("random = %x %x %x %x\n", conn->sc_server_random[0],
+            conn->sc_server_random[1],conn->sc_server_random[2],conn->sc_server_random[3]);
+    p = (void *)&h->sh_session_id[0];
+    p += h->sh_session_id_len;
+    conn->sc_cipher = ntohs(*((uint16_t *)p));
+
+    CT_LOG("cipher = %x\n", conn->sc_cipher);
     return 0;
 }
-
 
 int
 tls1_2_handshake_proc(ssl_conn_t *conn, void *data, uint16_t len, int client)

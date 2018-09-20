@@ -21,6 +21,7 @@ typedef struct _ssl_conn_t {
     ssl_buffer_t        sc_client_buffer;
     ssl_buffer_t        sc_server_buffer;
     bool                sc_renego;
+    uint16_t            sc_cipher;
 } ssl_conn_t;
 
 typedef int (*record_proc_f)(ssl_conn_t *conn, void *data,

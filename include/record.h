@@ -24,10 +24,23 @@ typedef struct _random_t {
     uint8_t         rm_random_bytes[RANDOM_BYTE_LEN];
 } random_t;
 
-typedef struct _client_hello_t {
+struct _client_hello_t {
     uint16_t        ch_version;
     random_t        ch_random;
-} client_hello_t;
+    uint8_t         ch_session_id_len;
+    uint8_t         ch_session_id[0];
+} __attribute__ ((__packed__));
+
+typedef struct _client_hello_t client_hello_t;
+
+struct _server_hello_t {
+    uint16_t        sh_version;
+    random_t        sh_random;
+    uint8_t         sh_session_id_len;
+    uint8_t         sh_session_id[0];
+} __attribute__ ((__packed__));
+
+typedef struct _server_hello_t server_hello_t;
 
 static inline uint32_t get_len_3byte(uint8_t *len)
 {
