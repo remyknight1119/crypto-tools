@@ -64,6 +64,37 @@ static ssl_proto_t proto_handler[] = {
 
 #define SSL_PROTO_HANDLER_NUM   CT_ARRAY_SIZE(proto_handler)
 
+static ssl_cipher_t ssl_cipher[] = {
+    {
+        .sp_id = TLS1_CK_RSA_WITH_AES_128_SHA,
+        .sp_algorithm_mkey = SSL_kRSA,
+        .sp_algorithm_enc = SSL_AES128,
+        .sp_algorithm_mac = SSL_SHA1,
+    },
+    {
+        .sp_id = TLS1_CK_RSA_WITH_AES_256_SHA,
+        .sp_algorithm_mkey = SSL_kRSA,
+        .sp_algorithm_enc = SSL_AES256,
+        .sp_algorithm_mac = SSL_SHA1,
+    },
+    {
+        .sp_id = TLS1_CK_RSA_WITH_AES_128_SHA256,
+        .sp_algorithm_mkey = SSL_kRSA,
+        .sp_algorithm_enc = SSL_AES128,
+        .sp_algorithm_mac = SSL_SHA256,
+    },
+    {
+        .sp_id = TLS1_CK_RSA_WITH_AES_256_SHA256,
+        .sp_algorithm_mkey = SSL_kRSA,
+        .sp_algorithm_enc = SSL_AES256,
+        .sp_algorithm_mac = SSL_SHA256,
+    },
+};
+
+#define SSL_CIPHER_NUM      CT_ARRAY_SIZE(ssl_cipher)
+
+RSA *rsa_private_key;
+
 static int
 ssl_record_proc(ssl_conn_t *ssl, record_t *r, int client)
 {
@@ -143,7 +174,45 @@ ssl_msg_proc(connection_t *conn, void *record, uint16_t len, int client)
     //CT_LOG("Wait more data, rlen = %d, len = %d, need len = %d\n", rlen, len, buffer->bf_need_len);
 }
 
-void
-ssl_init(void)
+ssl_cipher_t *
+ssl_get_cipher_by_id(uint32_t id)
 {
+    int     i = 0;
+
+    for (i = 0; i < SSL_CIPHER_NUM; i++) {
+        if ((ssl_cipher[i].sp_id & 0xFFFF) == id) {
+            return &ssl_cipher[i];
+        }
+    }
+
+    return NULL;
+}
+
+int
+ssl_init(const char *file)
+{
+    BIO     *in = NULL;
+    int     ret = -1;
+
+    in = BIO_new(BIO_s_file());
+    if (in == NULL) {
+        CT_LOG("New BIO failed\n");
+        goto out;
+    }
+
+    if (BIO_read_filename(in, file) <= 0) {
+        CT_LOG("Read %s failed\n", file);
+        goto out;
+    }
+
+    rsa_private_key = PEM_read_bio_RSAPrivateKey(in, NULL, NULL, NULL);
+    if (rsa_private_key == NULL) {
+        CT_LOG("Load key freom %s failed\n", file);
+        goto out;
+    }
+
+    ret = 0;
+out:
+    BIO_free(in);
+    return ret;
 }

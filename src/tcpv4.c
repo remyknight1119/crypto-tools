@@ -95,5 +95,4 @@ tcp_v4_handler(uint32_t daddr, uint32_t saddr, void *proto_header, uint16_t len)
 void
 tcp_v4_init(void)
 {
-    ssl_init();
 }

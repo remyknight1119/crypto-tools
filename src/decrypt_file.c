@@ -5,6 +5,7 @@
 #include "tool.h"
 #include "proto.h"
 #include "log.h"
+#include "ssl.h"
 
 static void loop_callback(u_char *args, const struct pcap_pkthdr *header,
         const u_char *packet);
@@ -30,6 +31,11 @@ ct_decrypt_file(const char *output, const char *input, const char *key,
             return -1;
         }
     } 
+
+    if (ssl_init(key) != 0) {
+        CT_LOG("SSL init failed\n");
+        return -1;
+    }
 
     pcap_loop(handle, -1, loop_callback, NULL);
 
