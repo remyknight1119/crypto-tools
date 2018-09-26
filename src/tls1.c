@@ -150,6 +150,9 @@ tls1_2_handshake_proc(ssl_conn_t *conn, void *data,
             return -1;
         }
 
+        if (conn->sc_change_cipher_spec == true) {
+        } else {
+        }
         pkt.curr = (void *)(h + 1);
         pkt.remaining = mlen;
         if (proc(conn, &pkt, client) < 0) {
@@ -180,6 +183,17 @@ int
 tls1_2_change_cipher_spec_proc(ssl_conn_t *conn, void *data, uint16_t len,
             int lcient)
 {
+    uint8_t     *type = data;
+
+    CT_LOG("change cipher type = %d\n", *type);
+    if (*type == TLS1_CHANGE_CIPHER_SPEC_TYPE_CHANGE_CIPHER_SPEC) {
+        conn->sc_change_cipher_spec = true;
+    }
+
+    if (tls1_setup_key_block(conn) != 0) {
+        return -1;
+    }
+
     return 0;
 }
 

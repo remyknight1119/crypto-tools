@@ -3,6 +3,8 @@
 
 #include <stdbool.h>
 #include <openssl/ossl_typ.h>
+#include <openssl/ssl.h>
+#include <openssl/ssl3.h>
 
 #include "tcp.h"
 #include "record.h"
@@ -18,14 +20,17 @@ typedef struct _ssl_buffer_t {
 
 typedef struct _ssl_conn_t {
     tcp_conn_t          sc_conn;
-    uint8_t             sc_client_random[RANDOM_BYTE_LEN];
-    uint8_t             sc_server_random[RANDOM_BYTE_LEN];
+    uint8_t             sc_client_random[SSL3_RANDOM_SIZE];
+    uint8_t             sc_server_random[SSL3_RANDOM_SIZE];
     ssl_buffer_t        sc_client_buffer;
     ssl_buffer_t        sc_server_buffer;
     bool                sc_renego;
+    bool                sc_change_cipher_spec;
     ssl_cipher_t        *sc_cipher;
-    pre_master_secret_t sc_pre_master;
-    EVP_PKEY            *sc_private_key;
+    uint8_t             sc_master_key[SSL_MAX_MASTER_KEY_LENGTH];
+    uint32_t            sc_master_key_length;
+    int                 sc_key_block_length;
+    unsigned char       *sc_key_block;
 } ssl_conn_t;
 
 extern RSA *rsa_private_key;

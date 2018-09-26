@@ -1,6 +1,8 @@
 #include <assert.h>
 #include <openssl/ssl3.h>
 #include <openssl/tls1.h>
+#include <openssl/obj_mac.h>
+#include <openssl/evp.h>
 
 #include  "ssl.h"
 #include  "log.h"
@@ -70,24 +72,32 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_mkey = SSL_kRSA,
         .sp_algorithm_enc = SSL_AES128,
         .sp_algorithm_mac = SSL_SHA1,
+        .sp_cipher_nid = NID_aes_128_cbc,
+        .sp_md_nid = NID_sha1,
     },
     {
         .sp_id = TLS1_CK_RSA_WITH_AES_256_SHA,
         .sp_algorithm_mkey = SSL_kRSA,
         .sp_algorithm_enc = SSL_AES256,
         .sp_algorithm_mac = SSL_SHA1,
+        .sp_cipher_nid = NID_aes_256_cbc,
+        .sp_md_nid = NID_sha1,
     },
     {
         .sp_id = TLS1_CK_RSA_WITH_AES_128_SHA256,
         .sp_algorithm_mkey = SSL_kRSA,
         .sp_algorithm_enc = SSL_AES128,
         .sp_algorithm_mac = SSL_SHA256,
+        .sp_cipher_nid = NID_aes_128_cbc,
+        .sp_md_nid = NID_sha256,
     },
     {
         .sp_id = TLS1_CK_RSA_WITH_AES_256_SHA256,
         .sp_algorithm_mkey = SSL_kRSA,
         .sp_algorithm_enc = SSL_AES256,
         .sp_algorithm_mac = SSL_SHA256,
+        .sp_cipher_nid = NID_aes_256_cbc,
+        .sp_md_nid = NID_sha256,
     },
 };
 
@@ -193,6 +203,22 @@ ssl_init(const char *file)
 {
     BIO     *in = NULL;
     int     ret = -1;
+
+    EVP_add_cipher(EVP_aes_128_cbc());
+    EVP_add_cipher(EVP_aes_192_cbc());
+    EVP_add_cipher(EVP_aes_256_cbc());
+    EVP_add_cipher(EVP_aes_128_gcm());
+    EVP_add_cipher(EVP_aes_256_gcm());
+    EVP_add_cipher(EVP_aes_128_ccm());
+    EVP_add_cipher(EVP_aes_256_ccm());
+    EVP_add_cipher(EVP_aes_128_cbc_hmac_sha1());
+    EVP_add_cipher(EVP_aes_256_cbc_hmac_sha1());
+    EVP_add_cipher(EVP_aes_128_cbc_hmac_sha256());
+    EVP_add_cipher(EVP_aes_256_cbc_hmac_sha256());
+
+    EVP_add_digest(EVP_sha1());
+    EVP_add_digest(EVP_sha256());
+    EVP_add_digest(EVP_sha512());
 
     in = BIO_new(BIO_s_file());
     if (in == NULL) {

@@ -46,6 +46,12 @@
 #define SSL_GOST89MAC12             0x00000100U
 #define SSL_GOST12_512              0x00000200U
 
+enum {
+    TLS1_CHANGE_CIPHER_SPEC_TYPE_CHANGE_CIPHER_SPEC = 1,
+    TLS1_CHANGE_CIPHER_SPEC_TYPE_MAX = 255,
+};
+
+
 extern int tls1_2_handshake_proc(ssl_conn_t *conn, void *data,
             uint16_t len, int client);
 extern int tls1_2_application_data_proc(ssl_conn_t *conn, void *data,
