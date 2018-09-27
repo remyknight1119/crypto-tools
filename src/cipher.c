@@ -35,6 +35,19 @@ tls1_PRF(ssl_conn_t *ssl,
         CT_LOG("Get MD(%d) failed!\n", ssl->sc_cipher->sp_md_nid);
         return -1;
     }
+    CT_LOG("NID = %d\n", ssl->sc_cipher->sp_md_nid);
+    if (seed1)
+        CT_PRINT(seed1, seed1_len);
+    if (seed2)
+        CT_PRINT(seed2, seed2_len);
+    if (seed3)
+        CT_PRINT(seed3, seed3_len);
+    if (seed4)
+        CT_PRINT(seed4, seed4_len);
+    if (seed5)
+        CT_PRINT(seed5, seed5_len);
+    CT_PRINT(sec, slen);
+
     pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_TLS1_PRF, NULL);
     if (pctx == NULL || EVP_PKEY_derive_init(pctx) <= 0
         || EVP_PKEY_CTX_set_tls1_prf_md(pctx, md) <= 0
@@ -67,6 +80,8 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
     RSA                     *rsa = rsa_private_key;
     uint16_t                *len = pkt->data;
     const unsigned char     *p = NULL;
+    int                     hashlen = 0;
+    unsigned char           hash[EVP_MAX_MD_SIZE * 2] = {};
     int                     decrypt_len = 0;
     int                     padding_len = 0;
     pre_master_secret_t     secret = {};
@@ -91,19 +106,31 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
     p = (void *)&secret.pm_pre_master[padding_len];
     CT_PRINT(p, SSL_MAX_MASTER_KEY_LENGTH);
 
-    if (tls1_PRF(ssl,
+    CT_LOG("\n===================================================\n");
+    if (ssl->sc_ext_master_secret) {
+        tls1_PRF(ssl,
+            TLS_MD_EXTENDED_MASTER_SECRET_CONST,
+            TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE,
+            hash, hashlen,
+            NULL, 0,
+            NULL, 0,
+            NULL, 0, p, SSL_MAX_MASTER_KEY_LENGTH, ssl->sc_master_key,
+            SSL_MAX_MASTER_KEY_LENGTH);
+        CT_LOG("ext master secret!\n");
+    } else {
+        tls1_PRF(ssl,
             TLS_MD_MASTER_SECRET_CONST,
             TLS_MD_MASTER_SECRET_CONST_SIZE,
             ssl->sc_client_random, SSL3_RANDOM_SIZE,
             NULL, 0,
             ssl->sc_server_random, SSL3_RANDOM_SIZE,
             NULL, 0, p, SSL_MAX_MASTER_KEY_LENGTH, ssl->sc_master_key,
-            SSL_MAX_MASTER_KEY_LENGTH) != 0) {
-        CT_LOG("Generate master key failed!\n");
-        return -1;
+            SSL_MAX_MASTER_KEY_LENGTH);
+        CT_LOG("Generate master key!\n");
     }
 
     ssl->sc_master_key_length = SSL_MAX_MASTER_KEY_LENGTH;
+    CT_LOG("\n===================================================\n");
 
     return 0;
 }
@@ -150,8 +177,10 @@ tls1_setup_key_block(ssl_conn_t *ssl)
         return -1;
     }
 
+    ssl->sc_evp_cipher = c;
     ssl->sc_key_block = p;
     ssl->sc_key_block_length = num;
+    ssl->sc_mac_secret_size = mac_secret_size;
 
     CT_LOG("key block len = %d\n", num);
     return tls1_PRF(ssl,

@@ -8,11 +8,11 @@
 #include  "cipher.h"
 
 
-typedef int (*handshake_proc_f)(ssl_conn_t *conn, PACKET *pkt, int client);
-static int tls1_2_hello_request(ssl_conn_t *conn, PACKET *pkt, int client);
-static int tls1_2_client_hello(ssl_conn_t *conn, PACKET *pkt, int client);
-static int tls1_2_server_hello(ssl_conn_t *conn, PACKET *pkt, int client);
-static int tls1_2_client_key_exchange(ssl_conn_t *conn,
+typedef int (*handshake_proc_f)(ssl_conn_t *ssl, PACKET *pkt, int client);
+static int tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt, int client);
+static int tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt, int client);
+static int tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt, int client);
+static int tls1_2_client_key_exchange(ssl_conn_t *ssl,
             PACKET *pkt, int client);
 
 typedef struct _ssl_key_t {
@@ -20,6 +20,13 @@ typedef struct _ssl_key_t {
     int         (*ky_process_key)(ssl_conn_t *ssl, PACKET *pkt);
 } ssl_key_t;
 
+typedef struct _ssl_extension_t {
+    uint16_t    st_type;
+    int         (*st_proc)(ssl_conn_t *ssl, uint8_t *data, uint16_t len);
+} ssl_extension_t;
+
+
+unsigned char tls_plaintext[65535];
 
 static handshake_proc_f tls1_2_handshake_handler[] = {
     tls1_2_hello_request, /* 0 */
@@ -58,43 +65,101 @@ static ssl_key_t key_proc[] = {
 
 #define TLS1_KEY_PROC_NUM       CT_ARRAY_SIZE(key_proc)
 
+static int ssl_ext_extended_master_secret(ssl_conn_t *ssl,
+        uint8_t *data, uint16_t len);
+
+static ssl_extension_t ext_proc[] = {
+    {
+        .st_type = TLSEXT_TYPE_extended_master_secret,
+        .st_proc = ssl_ext_extended_master_secret,
+    },
+};
+
+#define SSL_EXT_PROC_NUM        CT_ARRAY_SIZE(ext_proc)
+
 static int
-tls1_2_hello_request(ssl_conn_t *conn, PACKET *pkt, int client)
+tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt, int client)
 {
-    conn->sc_renego = 1;
+    ssl->sc_renego = 1;
     return 0;
 }
 
 static int
-tls1_2_client_hello(ssl_conn_t *conn, PACKET *pkt, int client)
+ssl_ext_extended_master_secret(ssl_conn_t *ssl,
+        uint8_t *data, uint16_t len)
+{
+    ssl->sc_ext_master_secret = 1;
+    CT_LOG("master\n");
+
+    return 0;
+}
+
+static int
+tls1_2_client_ext(ssl_conn_t *ssl, uint8_t *data, uint16_t len)
+{
+    extension_t     *ext = NULL;
+    uint16_t        offset = 0;
+    int             i = 0;
+
+    CT_LOG("extlen=%d\n", len);
+
+    while (offset < len) {
+        ext = (void *)(data + offset);
+        offset += sizeof(*ext) + ntohs(ext->et_length);
+        for (i = 0; i < SSL_EXT_PROC_NUM; i++) {
+            if (ext_proc[i].st_type == ntohs(ext->et_type)) {
+                ext_proc[i].st_proc(ssl, (void *)(ext + 1),
+                        ntohs(ext->et_length));
+            }
+        }
+    }
+
+    return 0;
+}
+
+static int
+tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt, int client)
 {
     client_hello_t      *h = (void *)pkt->curr;
+    uint8_t             *p = NULL;
+    uint8_t             *comp_len = NULL;
+    uint16_t            cipher_len = 0;
+    uint16_t            ext_len = 0;
 
     assert(pkt->remaining >= sizeof(*h));
-    memcpy(conn->sc_client_random, h->ch_random.rm_random_bytes,
-            sizeof(conn->sc_client_random));
+    memcpy(ssl->sc_client_random, &h->ch_random,
+            sizeof(ssl->sc_client_random));
+    CT_LOG("clientrandom:");
+    CT_PRINT(h->ch_random.rm_random_bytes, (int)sizeof(ssl->sc_client_random));
+    p = (void *)&h->ch_session_id[0];
+    p += h->ch_session_id_len;
+    cipher_len = ntohs(*((uint16_t *)p));
+    p += sizeof(cipher_len) + cipher_len;
+    comp_len = p;
+    p += sizeof(*comp_len) + *comp_len;
+    ext_len = ntohs(*((uint16_t *)p));
 
-    return 0;
+    return tls1_2_client_ext(ssl, p + sizeof(ext_len), ext_len);
 }
 
 static int
-tls1_2_server_hello(ssl_conn_t *conn, PACKET *pkt, int client)
+tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt, int client)
 {
     server_hello_t      *h = (void *)pkt->curr;
     uint8_t             *p = NULL;
     uint16_t            cipher = 0;
 
     assert(pkt->remaining >= sizeof(*h));
-    memcpy(conn->sc_server_random, h->sh_random.rm_random_bytes,
-            sizeof(conn->sc_server_random));
-    CT_LOG("random = %x %x %x %x\n", conn->sc_server_random[0],
-            conn->sc_server_random[1],conn->sc_server_random[2],conn->sc_server_random[3]);
+    memcpy(ssl->sc_server_random, &h->sh_random,
+            sizeof(ssl->sc_server_random));
+    CT_LOG("random = %x %x %x %x\n", ssl->sc_server_random[0],
+            ssl->sc_server_random[1],ssl->sc_server_random[2],ssl->sc_server_random[3]);
     p = (void *)&h->sh_session_id[0];
     p += h->sh_session_id_len;
     cipher = ntohs(*((uint16_t *)p));
 
-    conn->sc_cipher = ssl_get_cipher_by_id(cipher);
-    if (conn->sc_cipher == NULL) {
+    ssl->sc_cipher = ssl_get_cipher_by_id(cipher);
+    if (ssl->sc_cipher == NULL) {
         CT_LOG("Unsupport cipher %d\n", cipher);
         return -1;
     }
@@ -104,9 +169,9 @@ tls1_2_server_hello(ssl_conn_t *conn, PACKET *pkt, int client)
 }
 
 static int
-tls1_2_client_key_exchange(ssl_conn_t *conn, PACKET *pkt, int client)
+tls1_2_client_key_exchange(ssl_conn_t *ssl, PACKET *pkt, int client)
 {
-    ssl_cipher_t    *cipher = conn->sc_cipher;
+    ssl_cipher_t    *cipher = ssl->sc_cipher;
     int             i = 0;
     
     if (cipher == NULL) {
@@ -115,7 +180,7 @@ tls1_2_client_key_exchange(ssl_conn_t *conn, PACKET *pkt, int client)
 
     for (i = 0; i < TLS1_KEY_PROC_NUM; i++) {
         if (key_proc[i].ky_key & cipher->sp_algorithm_mkey) {
-            return key_proc[i].ky_process_key(conn, pkt);
+            return key_proc[i].ky_process_key(ssl, pkt);
         }
     }
 
@@ -123,7 +188,7 @@ tls1_2_client_key_exchange(ssl_conn_t *conn, PACKET *pkt, int client)
 }
 
 int
-tls1_2_handshake_proc(ssl_conn_t *conn, void *data,
+tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
             uint16_t len, int client)
 {
     handshake_t         *h = NULL;
@@ -134,9 +199,13 @@ tls1_2_handshake_proc(ssl_conn_t *conn, void *data,
 
     h = data;
     while (offset < len) {
+        if (ssl->sc_change_cipher_spec == true) {
+            tls1_enc(ssl, &tls_plaintext[0], (void *)h, len - offset);
+            h = (void *)&tls_plaintext[0];
+        }
         mlen = ntohl(get_len_3byte(h->hk_len));
         CT_LOG("%s: type = %d, len = %d\n", client?"client":"server",h->hk_type, mlen);
-        if (conn->sc_renego) {
+        if (ssl->sc_renego) {
             CT_LOG("Renego handshake\n");
         }
         if (h->hk_type >= TLS1_2_HANDSHAKE_HANDLER_NUM) {
@@ -150,12 +219,9 @@ tls1_2_handshake_proc(ssl_conn_t *conn, void *data,
             return -1;
         }
 
-        if (conn->sc_change_cipher_spec == true) {
-        } else {
-        }
         pkt.curr = (void *)(h + 1);
         pkt.remaining = mlen;
-        if (proc(conn, &pkt, client) < 0) {
+        if (proc(ssl, &pkt, client) < 0) {
             return -1;
         }
 
@@ -167,32 +233,86 @@ tls1_2_handshake_proc(ssl_conn_t *conn, void *data,
 }
 
 int
-tls1_2_application_data_proc(ssl_conn_t *conn, void *data, uint16_t len,
+tls1_2_application_data_proc(ssl_conn_t *ssl, void *data, uint16_t len,
             int lcient)
 {
     return 0;
 }
 
 int
-tls1_2_alert_proc(ssl_conn_t *conn, void *data, uint16_t len, int lcient)
+tls1_2_alert_proc(ssl_conn_t *ssl, void *data, uint16_t len, int lcient)
 {
     return 0;
 }
 
 int
-tls1_2_change_cipher_spec_proc(ssl_conn_t *conn, void *data, uint16_t len,
-            int lcient)
+tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
+            int client)
 {
-    uint8_t     *type = data;
+    EVP_CIPHER_CTX      *dd = NULL;
+    uint8_t             *type = data;
+    unsigned char       *p = NULL;
+    unsigned char       *key = NULL;
+    unsigned char       *iv = NULL;
+    int                 cl = 0;
+    int                 i = 0;
+    int                 j = 0;
+    int                 k = 0;
+    int                 n = 0;
 
-    CT_LOG("change cipher type = %d\n", *type);
     if (*type == TLS1_CHANGE_CIPHER_SPEC_TYPE_CHANGE_CIPHER_SPEC) {
-        conn->sc_change_cipher_spec = true;
+        ssl->sc_change_cipher_spec = true;
     }
 
-    if (tls1_setup_key_block(conn) != 0) {
+    if (tls1_setup_key_block(ssl) != 0) {
         return -1;
     }
+
+    p = ssl->sc_key_block;
+    cl = EVP_CIPHER_key_length(ssl->sc_evp_cipher);
+    j = cl;
+    i = ssl->sc_mac_secret_size;
+    k = EVP_CIPHER_iv_length(ssl->sc_evp_cipher);
+    CT_LOG("change cipher type = %d, cl = %d, k = %d\n", *type, cl, k);
+    if (client) {
+        n = i + i;
+        key = &(p[n]);
+        n += j + j;
+        iv = &(p[n]);
+        n += k + k;
+    } else {
+        n = i;
+        n += i + j;
+        key = &(p[n]);
+        n += j + k;
+        iv = &(p[n]);
+        n += k;
+    }
+
+    if ((ssl->sc_enc_read_ctx = EVP_CIPHER_CTX_new()) == NULL) {
+        CT_LOG("New CTX failed!\n");
+        return -1;
+    }
+    assert(n <= ssl->sc_key_block_length);
+    dd = ssl->sc_enc_read_ctx;
+    if (!EVP_CipherInit_ex(dd, ssl->sc_evp_cipher, NULL, key, iv, 0)) {
+        CT_LOG("EVP_CipherInit_ex failed!\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+int
+tls1_enc(ssl_conn_t *ssl, unsigned char *out, const unsigned char *in,
+            uint32_t len)
+{
+    EVP_CIPHER_CTX      *ds = NULL;
+
+    ds = ssl->sc_enc_read_ctx;
+    //CT_PRINT(in, len);
+    EVP_Cipher(ds, out, in, len);
+    //CT_PRINT(out, len);
 
     return 0;
 }

@@ -60,5 +60,7 @@ extern int tls1_2_alert_proc(ssl_conn_t *conn, void *data, uint16_t len,
             int lcient);
 extern int tls1_2_change_cipher_spec_proc(ssl_conn_t *conn, void *data,
             uint16_t len, int lcient);
+extern int tls1_enc(ssl_conn_t *ssl, unsigned char *out,
+            const unsigned char *in, uint32_t len);
 
 #endif

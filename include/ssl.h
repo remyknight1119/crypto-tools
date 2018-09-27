@@ -31,6 +31,10 @@ typedef struct _ssl_conn_t {
     uint32_t            sc_master_key_length;
     int                 sc_key_block_length;
     unsigned char       *sc_key_block;
+    const EVP_CIPHER    *sc_evp_cipher;
+    int                 sc_mac_secret_size;
+    int                 sc_ext_master_secret;
+    EVP_CIPHER_CTX      *sc_enc_read_ctx;
 } ssl_conn_t;
 
 extern RSA *rsa_private_key;

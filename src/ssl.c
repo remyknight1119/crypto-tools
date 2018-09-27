@@ -73,7 +73,7 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_enc = SSL_AES128,
         .sp_algorithm_mac = SSL_SHA1,
         .sp_cipher_nid = NID_aes_128_cbc,
-        .sp_md_nid = NID_sha1,
+        .sp_md_nid = NID_sha256,
     },
     {
         .sp_id = TLS1_CK_RSA_WITH_AES_256_SHA,
@@ -81,7 +81,7 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_enc = SSL_AES256,
         .sp_algorithm_mac = SSL_SHA1,
         .sp_cipher_nid = NID_aes_256_cbc,
-        .sp_md_nid = NID_sha1,
+        .sp_md_nid = NID_sha256,
     },
     {
         .sp_id = TLS1_CK_RSA_WITH_AES_128_SHA256,

@@ -24,6 +24,11 @@ typedef struct _random_t {
     uint8_t         rm_random_bytes[RANDOM_BYTE_LEN];
 } random_t;
 
+typedef struct _extension_t {
+    uint16_t        et_type;
+    uint16_t        et_length;
+} extension_t;
+
 struct _client_hello_t {
     uint16_t        ch_version;
     random_t        ch_random;
