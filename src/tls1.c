@@ -12,6 +12,7 @@ typedef int (*handshake_proc_f)(ssl_conn_t *ssl, PACKET *pkt, int client);
 static int tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt, int client);
 static int tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt, int client);
 static int tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt, int client);
+static int tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt, int client);
 static int tls1_2_client_key_exchange(ssl_conn_t *ssl,
             PACKET *pkt, int client);
 
@@ -26,14 +27,12 @@ typedef struct _ssl_extension_t {
 } ssl_extension_t;
 
 
-unsigned char tls_plaintext[65535];
-
 static handshake_proc_f tls1_2_handshake_handler[] = {
     tls1_2_hello_request, /* 0 */
     tls1_2_client_hello, /* 1 */
     tls1_2_server_hello, /* 2 */
     NULL, /* 3 */
-    NULL, /* 4 */
+    tls1_2_new_session_ticket, /* 4 */
     NULL, /* 5 */
     NULL, /* 6 */
     NULL, /* 7 */
@@ -67,11 +66,17 @@ static ssl_key_t key_proc[] = {
 
 static int ssl_ext_extended_master_secret(ssl_conn_t *ssl,
         uint8_t *data, uint16_t len);
+static int ssl_ext_use_etm(ssl_conn_t *ssl,
+        uint8_t *data, uint16_t len);
 
 static ssl_extension_t ext_proc[] = {
     {
         .st_type = TLSEXT_TYPE_extended_master_secret,
         .st_proc = ssl_ext_extended_master_secret,
+    },
+    {
+        .st_type = TLSEXT_TYPE_encrypt_then_mac,
+        .st_proc = ssl_ext_use_etm,
     },
 };
 
@@ -90,6 +95,14 @@ ssl_ext_extended_master_secret(ssl_conn_t *ssl,
 {
     ssl->sc_ext_master_secret = 1;
     CT_LOG("master\n");
+
+    return 0;
+}
+
+static int
+ssl_ext_use_etm(ssl_conn_t *ssl, uint8_t *data, uint16_t len)
+{
+    ssl->sc_tlsext_use_etm = 1;
 
     return 0;
 }
@@ -187,21 +200,83 @@ tls1_2_client_key_exchange(ssl_conn_t *ssl, PACKET *pkt, int client)
     return -1;
 }
 
+static int
+tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt, int client)
+{
+    return 0;
+}
+
+static int
+tls1_cbc_remove_padding(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
+        int bs, int mac_size, uint16_t *offset)
+{
+    unsigned char   *data = out;
+
+    data += bs;
+    *olen -= bs;
+    *offset = bs;
+
+    memmove(out, data, *olen);
+    return 0;
+}
+
+int
+tls1_enc(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
+        const unsigned char *in, uint32_t in_len)
+{
+    EVP_CIPHER_CTX      *ds = NULL;
+    uint16_t            offset = 0;
+    int                 bs = 0;
+
+    ds = ssl->sc_curr->hc_enc_read_ctx;
+    bs = EVP_CIPHER_block_size(EVP_CIPHER_CTX_cipher(ds));
+    printf("--------------------------------------bs = %d\n", bs);
+    CT_PRINT(in, in_len);
+    EVP_Cipher(ds, out, in, in_len);
+    *olen = in_len;
+    tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size,
+            &offset);
+    CT_PRINT(out, *olen);
+    printf("--------------------------------------\n");
+
+    return 0;
+}
+
+int
+tls1_get_record(ssl_conn_t *ssl, const unsigned char *in, uint32_t len)
+{
+    uint32_t            clen = len;
+
+    if (ssl->sc_tlsext_use_etm && ssl->sc_read_hash) {
+        clen -= EVP_MD_CTX_size(ssl->sc_read_hash);
+    }
+
+    tls1_enc(ssl, ssl->sc_data, &ssl->sc_data_len, in, clen);
+
+    return 0;
+}
+
 int
 tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
             uint16_t len, int client)
 {
     handshake_t         *h = NULL;
+    bool                change_cipher_spec = 0;
     PACKET              pkt = {};
     handshake_proc_f    proc = NULL;
     uint16_t            offset = 0;
     uint32_t            mlen = 0;
+    int                 finish = 0;
 
     h = data;
     while (offset < len) {
-        if (ssl->sc_change_cipher_spec == true) {
-            tls1_enc(ssl, &tls_plaintext[0], (void *)h, len - offset);
-            h = (void *)&tls_plaintext[0];
+        change_cipher_spec =
+            client ? ssl->sc_client_change_cipher_spec : ssl->sc_server_change_cipher_spec;
+        CT_LOG("server %d, ch = %d\n", !client, ssl->sc_server_change_cipher_spec);
+        if (change_cipher_spec == true) {
+            tls1_get_record(ssl, (void *)h, len - offset);
+            h = (void *)&ssl->sc_data[0];
+            finish = 1;
         }
         mlen = ntohl(get_len_3byte(h->hk_len));
         CT_LOG("%s: type = %d, len = %d\n", client?"client":"server",h->hk_type, mlen);
@@ -225,6 +300,9 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
             return -1;
         }
 
+        if (finish) {
+            break;
+        }
         offset += mlen + sizeof(*h);
         h = (void *)((char *)(h + 1) + mlen);
     }
@@ -245,23 +323,51 @@ tls1_2_alert_proc(ssl_conn_t *ssl, void *data, uint16_t len, int lcient)
     return 0;
 }
 
+static int
+tls1_2_init_enc_read(ssl_conn_t *ssl, EVP_CIPHER_CTX **dd, unsigned char *key,
+        unsigned char *iv, int n)
+{
+    if ((*dd = EVP_CIPHER_CTX_new()) == NULL) {
+        CT_LOG("New CTX failed!\n");
+        return -1;
+    }
+    assert(n <= ssl->sc_key_block_length);
+    if (!EVP_CipherInit_ex(*dd, ssl->sc_evp_cipher, NULL, key, iv, 0)) {
+        CT_LOG("EVP_CipherInit_ex failed!\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 int
 tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
             int client)
 {
-    EVP_CIPHER_CTX      *dd = NULL;
+    EVP_MD_CTX          *mac_ctx = NULL;
+    EVP_PKEY            *mac_key = NULL;
     uint8_t             *type = data;
+    unsigned char       *ms = NULL;
+    unsigned char       *mac_secret = NULL;
     unsigned char       *p = NULL;
     unsigned char       *key = NULL;
     unsigned char       *iv = NULL;
+    bool                *change_cipher_spec = NULL;
     int                 cl = 0;
     int                 i = 0;
     int                 j = 0;
     int                 k = 0;
     int                 n = 0;
+    int                 ret = 0;
 
     if (*type == TLS1_CHANGE_CIPHER_SPEC_TYPE_CHANGE_CIPHER_SPEC) {
-        ssl->sc_change_cipher_spec = true;
+        change_cipher_spec =
+            client ? &ssl->sc_client_change_cipher_spec : &ssl->sc_server_change_cipher_spec;
+        *change_cipher_spec = true;
+        if (ssl->sc_server_change_cipher_spec) {
+            CT_LOG("Server change cipher spec\n");
+            return 0;
+        }
     }
 
     if (tls1_setup_key_block(ssl) != 0) {
@@ -275,6 +381,7 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     k = EVP_CIPHER_iv_length(ssl->sc_evp_cipher);
     CT_LOG("change cipher type = %d, cl = %d, k = %d\n", *type, cl, k);
     if (client) {
+        ms = &(p[0]);
         n = i + i;
         key = &(p[n]);
         n += j + j;
@@ -282,6 +389,7 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
         n += k + k;
     } else {
         n = i;
+        ms = &(p[n]);
         n += i + j;
         key = &(p[n]);
         n += j + k;
@@ -289,30 +397,34 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
         n += k;
     }
 
-    if ((ssl->sc_enc_read_ctx = EVP_CIPHER_CTX_new()) == NULL) {
-        CT_LOG("New CTX failed!\n");
+    ret = tls1_2_init_enc_read(ssl, &ssl->sc_client.hc_enc_read_ctx, key, iv, n);
+    if (ret < 0) {
+        CT_LOG("Init enc failed!\n");
         return -1;
     }
-    assert(n <= ssl->sc_key_block_length);
-    dd = ssl->sc_enc_read_ctx;
-    if (!EVP_CipherInit_ex(dd, ssl->sc_evp_cipher, NULL, key, iv, 0)) {
-        CT_LOG("EVP_CipherInit_ex failed!\n");
+    ret = tls1_2_init_enc_read(ssl, &ssl->sc_server.hc_enc_read_ctx, key, iv, n);
+    if (ret < 0) {
+        CT_LOG("Init enc failed!\n");
+        return -1;
+    }
+    ssl->sc_read_hash = EVP_MD_CTX_new();
+    if (ssl->sc_read_hash == NULL) {
+        CT_LOG("New MD CTX failed!\n");
         return -1;
     }
 
-    return 0;
-}
+    mac_ctx = ssl->sc_read_hash;
+    mac_secret = ms;
+    mac_key = EVP_PKEY_new_mac_key(ssl->sc_mac_type, NULL,
+            mac_secret, ssl->sc_mac_secret_size);
+    if (mac_key == NULL ||
+            EVP_DigestSignInit(mac_ctx, NULL, ssl->sc_new_hash,
+                NULL, mac_key) <= 0) {
+        CT_LOG("Mac key failed!\n");
+        return -1;
+    }
 
-int
-tls1_enc(ssl_conn_t *ssl, unsigned char *out, const unsigned char *in,
-            uint32_t len)
-{
-    EVP_CIPHER_CTX      *ds = NULL;
-
-    ds = ssl->sc_enc_read_ctx;
-    //CT_PRINT(in, len);
-    EVP_Cipher(ds, out, in, len);
-    //CT_PRINT(out, len);
+    CT_LOG("MDSIZE = %d\n", EVP_MD_CTX_size(mac_ctx));
 
     return 0;
 }

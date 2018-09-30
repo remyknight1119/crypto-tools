@@ -73,6 +73,7 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_enc = SSL_AES128,
         .sp_algorithm_mac = SSL_SHA1,
         .sp_cipher_nid = NID_aes_128_cbc,
+        .sp_mac_nid = NID_sha1,
         .sp_md_nid = NID_sha256,
     },
     {
@@ -81,6 +82,7 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_enc = SSL_AES256,
         .sp_algorithm_mac = SSL_SHA1,
         .sp_cipher_nid = NID_aes_256_cbc,
+        .sp_mac_nid = NID_sha1,
         .sp_md_nid = NID_sha256,
     },
     {
@@ -89,6 +91,7 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_enc = SSL_AES128,
         .sp_algorithm_mac = SSL_SHA256,
         .sp_cipher_nid = NID_aes_128_cbc,
+        .sp_mac_nid = NID_sha256,
         .sp_md_nid = NID_sha256,
     },
     {
@@ -97,6 +100,7 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_algorithm_enc = SSL_AES256,
         .sp_algorithm_mac = SSL_SHA256,
         .sp_cipher_nid = NID_aes_256_cbc,
+        .sp_mac_nid = NID_sha256,
         .sp_md_nid = NID_sha256,
     },
 };
@@ -113,6 +117,7 @@ ssl_record_proc(ssl_conn_t *ssl, record_t *r, int client)
     uint16_t        version = 0;
     int             i = 0;
 
+    ssl->sc_curr = client ? &ssl->sc_client : &ssl->sc_server;
     version = ntohs(r->rd_version);
     for (i = 0; i < SSL_PROTO_HANDLER_NUM; i++) {
         if (proto_handler[i].pt_version == version) {

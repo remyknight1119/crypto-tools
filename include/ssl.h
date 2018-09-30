@@ -18,23 +18,36 @@ typedef struct _ssl_buffer_t {
     uint16_t            bf_need_len;
 } ssl_buffer_t;
 
+typedef struct _ssl_half_conn_t {
+    EVP_CIPHER_CTX      *hc_enc_read_ctx;
+} ssl_half_conn_t; 
+
 typedef struct _ssl_conn_t {
     tcp_conn_t          sc_conn;
+    ssl_half_conn_t     sc_client;
+    ssl_half_conn_t     sc_server;
+    ssl_half_conn_t     *sc_curr;
     uint8_t             sc_client_random[SSL3_RANDOM_SIZE];
     uint8_t             sc_server_random[SSL3_RANDOM_SIZE];
+    uint8_t             sc_data[SSL_PAYLOAD_MAX_LEN];
+    bool                sc_renego;
     ssl_buffer_t        sc_client_buffer;
     ssl_buffer_t        sc_server_buffer;
-    bool                sc_renego;
-    bool                sc_change_cipher_spec;
-    ssl_cipher_t        *sc_cipher;
+    uint16_t            sc_data_len;
     uint8_t             sc_master_key[SSL_MAX_MASTER_KEY_LENGTH];
     uint32_t            sc_master_key_length;
+    int                 sc_ext_master_secret;
+    int                 sc_tlsext_use_etm;
+    ssl_cipher_t        *sc_cipher;
     int                 sc_key_block_length;
     unsigned char       *sc_key_block;
+    bool                sc_client_change_cipher_spec;
+    bool                sc_server_change_cipher_spec;
     const EVP_CIPHER    *sc_evp_cipher;
+    int                 sc_mac_type;
     int                 sc_mac_secret_size;
-    int                 sc_ext_master_secret;
-    EVP_CIPHER_CTX      *sc_enc_read_ctx;
+    const EVP_MD        *sc_new_hash;
+    EVP_MD_CTX          *sc_read_hash;
 } ssl_conn_t;
 
 extern RSA *rsa_private_key;

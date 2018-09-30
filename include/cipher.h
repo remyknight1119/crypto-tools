@@ -9,6 +9,7 @@ typedef struct _ssl_cipher_t {
     uint32_t    sp_algorithm_enc;
     uint32_t    sp_algorithm_mac;
     int         sp_cipher_nid;
+    int         sp_mac_nid;
     int         sp_md_nid;
 } ssl_cipher_t;
 

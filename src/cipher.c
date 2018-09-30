@@ -104,7 +104,6 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
 
     padding_len = decrypt_len - SSL_MAX_MASTER_KEY_LENGTH;
     p = (void *)&secret.pm_pre_master[padding_len];
-    CT_PRINT(p, SSL_MAX_MASTER_KEY_LENGTH);
 
     CT_LOG("\n===================================================\n");
     if (ssl->sc_ext_master_secret) {
@@ -116,7 +115,7 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
             NULL, 0,
             NULL, 0, p, SSL_MAX_MASTER_KEY_LENGTH, ssl->sc_master_key,
             SSL_MAX_MASTER_KEY_LENGTH);
-        CT_LOG("ext master secret!\n");
+        CT_LOG("ext master secret:\n");
     } else {
         tls1_PRF(ssl,
             TLS_MD_MASTER_SECRET_CONST,
@@ -126,10 +125,11 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
             ssl->sc_server_random, SSL3_RANDOM_SIZE,
             NULL, 0, p, SSL_MAX_MASTER_KEY_LENGTH, ssl->sc_master_key,
             SSL_MAX_MASTER_KEY_LENGTH);
-        CT_LOG("Generate master key!\n");
+        CT_LOG("Generate master key:\n");
     }
 
     ssl->sc_master_key_length = SSL_MAX_MASTER_KEY_LENGTH;
+    CT_PRINT(ssl->sc_master_key, ssl->sc_master_key_length);
     CT_LOG("\n===================================================\n");
 
     return 0;
@@ -146,7 +146,8 @@ ssl_cipher_get_evp(const ssl_conn_t *ssl, const EVP_CIPHER **enc,
         CT_LOG("Get cipher by nid %x failed\n", cipher->sp_id);
         return -1;
     }
-    *md = EVP_get_digestbynid(cipher->sp_md_nid);
+    *md = EVP_get_digestbynid(cipher->sp_mac_nid);
+    CT_LOG("md nid = %d\n", cipher->sp_mac_nid);
     assert(*md != NULL);
     *mac_secret_size = EVP_MD_size(*md);
     *mac_pkey_type = EVP_PKEY_HMAC;
@@ -171,24 +172,31 @@ tls1_setup_key_block(ssl_conn_t *ssl)
     }
 
     num = EVP_CIPHER_key_length(c) + mac_secret_size + EVP_CIPHER_iv_length(c);
+    printf("111 num = %d, keylen = %d, szie = %d, lc = %d\n",
+            num, EVP_CIPHER_key_length(c), mac_secret_size, EVP_CIPHER_iv_length(c));
     num *= 2;
     if ((p = malloc(num)) == NULL) {
         CT_LOG("Malloc %d bytes failed\n", num);
         return -1;
     }
 
+    ssl->sc_new_hash = hash;
     ssl->sc_evp_cipher = c;
     ssl->sc_key_block = p;
     ssl->sc_key_block_length = num;
+    ssl->sc_mac_type = mac_type;
     ssl->sc_mac_secret_size = mac_secret_size;
 
-    CT_LOG("key block len = %d\n", num);
-    return tls1_PRF(ssl,
+    CT_LOG("key block:\n");
+    int ret = tls1_PRF(ssl,
             TLS_MD_KEY_EXPANSION_CONST,
             TLS_MD_KEY_EXPANSION_CONST_SIZE,
             ssl->sc_server_random, SSL3_RANDOM_SIZE,
             ssl->sc_client_random, SSL3_RANDOM_SIZE,
             NULL, 0, NULL, 0, ssl->sc_master_key, 
             ssl->sc_master_key_length, p, num);
+
+    CT_PRINT(p, num);
+    return ret;
 }
 
