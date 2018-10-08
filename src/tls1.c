@@ -230,14 +230,14 @@ tls1_enc(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
 
     ds = ssl->sc_curr->hc_enc_read_ctx;
     bs = EVP_CIPHER_block_size(EVP_CIPHER_CTX_cipher(ds));
-    printf("--------------------------------------bs = %d\n", bs);
-    CT_PRINT(in, in_len);
+    //printf("-----------------------------ds=%p---------bs = %d\n",ds, bs);
+    //CT_PRINT(in, in_len);
     EVP_Cipher(ds, out, in, in_len);
     *olen = in_len;
     tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size,
             &offset);
-    CT_PRINT(out, *olen);
-    printf("--------------------------------------\n");
+    //CT_PRINT(out, *olen);
+    //printf("--------------------------------------\n");
 
     return 0;
 }
@@ -270,9 +270,8 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
 
     h = data;
     while (offset < len) {
-        change_cipher_spec =
-            client ? ssl->sc_client_change_cipher_spec : ssl->sc_server_change_cipher_spec;
-        CT_LOG("server %d, ch = %d\n", !client, ssl->sc_server_change_cipher_spec);
+        change_cipher_spec = ssl->sc_curr->hc_change_cipher_spec;
+        CT_LOG("server %d, ch = %d\n", !client, change_cipher_spec);
         if (change_cipher_spec == true) {
             tls1_get_record(ssl, (void *)h, len - offset);
             h = (void *)&ssl->sc_data[0];
@@ -346,13 +345,13 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
 {
     EVP_MD_CTX          *mac_ctx = NULL;
     EVP_PKEY            *mac_key = NULL;
+    ssl_half_conn_t     *conn = NULL; 
     uint8_t             *type = data;
     unsigned char       *ms = NULL;
     unsigned char       *mac_secret = NULL;
     unsigned char       *p = NULL;
     unsigned char       *key = NULL;
     unsigned char       *iv = NULL;
-    bool                *change_cipher_spec = NULL;
     int                 cl = 0;
     int                 i = 0;
     int                 j = 0;
@@ -360,14 +359,9 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     int                 n = 0;
     int                 ret = 0;
 
+    conn = ssl->sc_curr;
     if (*type == TLS1_CHANGE_CIPHER_SPEC_TYPE_CHANGE_CIPHER_SPEC) {
-        change_cipher_spec =
-            client ? &ssl->sc_client_change_cipher_spec : &ssl->sc_server_change_cipher_spec;
-        *change_cipher_spec = true;
-        if (ssl->sc_server_change_cipher_spec) {
-            CT_LOG("Server change cipher spec\n");
-            return 0;
-        }
+        conn->hc_change_cipher_spec = true;
     }
 
     if (tls1_setup_key_block(ssl) != 0) {
@@ -397,15 +391,13 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
         n += k;
     }
 
-    ret = tls1_2_init_enc_read(ssl, &ssl->sc_client.hc_enc_read_ctx, key, iv, n);
+    ret = tls1_2_init_enc_read(ssl, &conn->hc_enc_read_ctx, key, iv, n);
     if (ret < 0) {
         CT_LOG("Init enc failed!\n");
         return -1;
     }
-    ret = tls1_2_init_enc_read(ssl, &ssl->sc_server.hc_enc_read_ctx, key, iv, n);
-    if (ret < 0) {
-        CT_LOG("Init enc failed!\n");
-        return -1;
+    if (ssl->sc_read_hash != NULL) {
+        return 0;
     }
     ssl->sc_read_hash = EVP_MD_CTX_new();
     if (ssl->sc_read_hash == NULL) {

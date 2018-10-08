@@ -75,6 +75,22 @@ tls1_PRF(ssl_conn_t *ssl,
 }
 
 int
+tls1_digest_cached_records(ssl_conn_t *ssl, int keep)
+{
+    EVP_MD_CTX          **dgst = NULL;
+
+    dgst = &ssl->sc_curr->hc_handshake_dgst;
+    if (*dgst == NULL) {
+        *dgst = EVP_MD_CTX_new();
+        if (*dgst == NULL) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+int
 tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
 {
     RSA                     *rsa = rsa_private_key;
@@ -106,6 +122,7 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
     p = (void *)&secret.pm_pre_master[padding_len];
 
     CT_LOG("\n===================================================\n");
+    assert(ssl->sc_ext_master_secret == 0);
     if (ssl->sc_ext_master_secret) {
         tls1_PRF(ssl,
             TLS_MD_EXTENDED_MASTER_SECRET_CONST,
@@ -165,6 +182,9 @@ tls1_setup_key_block(ssl_conn_t *ssl)
     int                 mac_type = NID_undef;
     int                 mac_secret_size = 0;
 
+    if (ssl->sc_key_block) {
+        return 0;
+    }
     if (ssl_cipher_get_evp(ssl, &c,  &hash, &mac_type,
                 &mac_secret_size) != 0) {
         CT_LOG("Get evp failed\n");

@@ -20,6 +20,8 @@ typedef struct _ssl_buffer_t {
 
 typedef struct _ssl_half_conn_t {
     EVP_CIPHER_CTX      *hc_enc_read_ctx;
+    EVP_MD_CTX          *hc_handshake_dgst;
+    bool                hc_change_cipher_spec;
 } ssl_half_conn_t; 
 
 typedef struct _ssl_conn_t {
@@ -41,8 +43,6 @@ typedef struct _ssl_conn_t {
     ssl_cipher_t        *sc_cipher;
     int                 sc_key_block_length;
     unsigned char       *sc_key_block;
-    bool                sc_client_change_cipher_spec;
-    bool                sc_server_change_cipher_spec;
     const EVP_CIPHER    *sc_evp_cipher;
     int                 sc_mac_type;
     int                 sc_mac_secret_size;
