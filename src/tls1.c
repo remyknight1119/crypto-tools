@@ -8,13 +8,16 @@
 #include  "cipher.h"
 
 
-typedef int (*handshake_proc_f)(ssl_conn_t *ssl, PACKET *pkt, int client);
-static int tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt, int client);
-static int tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt, int client);
-static int tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt, int client);
-static int tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt, int client);
+typedef int (*handshake_proc_f)(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_server_certificate(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_server_done(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_client_key_exchange(ssl_conn_t *ssl,
-            PACKET *pkt, int client);
+            PACKET *pkt);
+static int tls1_2_finished(ssl_conn_t *ssl, PACKET *pkt);
 
 typedef struct _ssl_key_t {
     uint32_t    ky_key;
@@ -39,16 +42,16 @@ static handshake_proc_f tls1_2_handshake_handler[] = {
     NULL, /* 8 */
     NULL, /* 9 */
     NULL, /* 10 */
-    NULL, /* 11 */
+    tls1_2_server_certificate, /* 11 */
     NULL, /* 12 */
     NULL, /* 13 */
-    NULL, /* 14 */
+    tls1_2_server_done, /* 14 */
     NULL, /* 15 */
     tls1_2_client_key_exchange, /* 16 */
     NULL, /* 17 */
     NULL, /* 18 */
     NULL, /* 19 */
-    NULL, /* 20 */
+    tls1_2_finished, /* 20 */
     NULL, /* 21 */
     NULL, /* 22 */
 };
@@ -83,7 +86,7 @@ static ssl_extension_t ext_proc[] = {
 #define SSL_EXT_PROC_NUM        CT_ARRAY_SIZE(ext_proc)
 
 static int
-tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt, int client)
+tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt)
 {
     ssl->sc_renego = 1;
     return 0;
@@ -131,7 +134,7 @@ tls1_2_client_ext(ssl_conn_t *ssl, uint8_t *data, uint16_t len)
 }
 
 static int
-tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt, int client)
+tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt)
 {
     client_hello_t      *h = (void *)pkt->curr;
     uint8_t             *p = NULL;
@@ -156,7 +159,7 @@ tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt, int client)
 }
 
 static int
-tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt, int client)
+tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt)
 {
     server_hello_t      *h = (void *)pkt->curr;
     uint8_t             *p = NULL;
@@ -182,7 +185,19 @@ tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt, int client)
 }
 
 static int
-tls1_2_client_key_exchange(ssl_conn_t *ssl, PACKET *pkt, int client)
+tls1_2_server_certificate(ssl_conn_t *ssl, PACKET *pkt)
+{
+    return 0;
+}
+
+static int
+tls1_2_server_done(ssl_conn_t *ssl, PACKET *pkt)
+{
+    return 0;
+}
+
+static int
+tls1_2_client_key_exchange(ssl_conn_t *ssl, PACKET *pkt)
 {
     ssl_cipher_t    *cipher = ssl->sc_cipher;
     int             i = 0;
@@ -201,7 +216,13 @@ tls1_2_client_key_exchange(ssl_conn_t *ssl, PACKET *pkt, int client)
 }
 
 static int
-tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt, int client)
+tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt)
+{
+    return 0;
+}
+
+static int
+tls1_2_finished(ssl_conn_t *ssl, PACKET *pkt)
 {
     return 0;
 }
@@ -230,14 +251,14 @@ tls1_enc(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
 
     ds = ssl->sc_curr->hc_enc_read_ctx;
     bs = EVP_CIPHER_block_size(EVP_CIPHER_CTX_cipher(ds));
-    //printf("-----------------------------ds=%p---------bs = %d\n",ds, bs);
-    //CT_PRINT(in, in_len);
+    printf("-----------------------------ds=%p---------bs = %d\n",ds, bs);
+    CT_PRINT(in, in_len);
     EVP_Cipher(ds, out, in, in_len);
     *olen = in_len;
     tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size,
             &offset);
-    //CT_PRINT(out, *olen);
-    //printf("--------------------------------------\n");
+    CT_PRINT(out, *olen);
+    printf("--------------------------------------\n");
 
     return 0;
 }
@@ -284,19 +305,19 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
         }
         if (h->hk_type >= TLS1_2_HANDSHAKE_HANDLER_NUM) {
             CT_LOG("Unknown type = %d\n", h->hk_type);
-            return -1;
+            goto out;
         }
 
         proc = tls1_2_handshake_handler[h->hk_type];
         if (proc == NULL) {
             CT_LOG("Unsupported type = %d\n", h->hk_type);
-            return -1;
+            goto out;
         }
 
         pkt.curr = (void *)(h + 1);
         pkt.remaining = mlen;
-        if (proc(ssl, &pkt, client) < 0) {
-            return -1;
+        if (proc(ssl, &pkt) < 0) {
+            goto out;
         }
 
         if (finish) {
@@ -307,12 +328,16 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
     }
 
     return 0;
+out:
+    connection_free((connection_t *)ssl);
+    return -1;
 }
 
 int
 tls1_2_application_data_proc(ssl_conn_t *ssl, void *data, uint16_t len,
             int lcient)
 {
+    tls1_enc(ssl, ssl->sc_data, &ssl->sc_data_len, data, len);
     return 0;
 }
 

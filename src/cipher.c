@@ -122,8 +122,12 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
     p = (void *)&secret.pm_pre_master[padding_len];
 
     CT_LOG("\n===================================================\n");
+#if 0
     assert(ssl->sc_ext_master_secret == 0);
     if (ssl->sc_ext_master_secret) {
+#else
+    if (0) {
+#endif
         tls1_PRF(ssl,
             TLS_MD_EXTENDED_MASTER_SECRET_CONST,
             TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE,
