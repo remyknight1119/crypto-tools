@@ -10,6 +10,7 @@
 #include <openssl/rand.h>
 
 #include "ssl.h"
+#include "tls1.h"
 #include "cipher.h"
 #include "log.h"
 
@@ -158,9 +159,11 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
 
 int
 ssl_cipher_get_evp(const ssl_conn_t *ssl, const EVP_CIPHER **enc,
-    const EVP_MD **md, int *mac_pkey_type, int *mac_secret_size)
+    const EVP_MD **md, int *mac_pkey_type, int *mac_secret_size,
+    int use_etm)
 {
     ssl_cipher_t        *cipher = ssl->sc_cipher;
+    const EVP_CIPHER    *evp = NULL;
 
     *enc = EVP_get_cipherbynid(cipher->sp_cipher_nid);
     if (*enc == NULL) {
@@ -172,8 +175,39 @@ ssl_cipher_get_evp(const ssl_conn_t *ssl, const EVP_CIPHER **enc,
     assert(*md != NULL);
     *mac_secret_size = EVP_MD_size(*md);
     *mac_pkey_type = EVP_PKEY_HMAC;
+    if ((*enc != NULL) && (*md != NULL || (EVP_CIPHER_flags(*enc) & EVP_CIPH_FLAG_AEAD_CIPHER))) {
+        CT_LOG("EEEEEEEEEEEEEEEEEEEEee\n");
+        if (use_etm) {
+            return 0;
+        }
 
-    return 0;
+        if (cipher->sp_algorithm_enc == SSL_AES128 &&
+                cipher->sp_algorithm_mac == SSL_SHA1 &&
+                (evp = EVP_get_cipherbyname("AES-128-CBC-HMAC-SHA1"))) {
+            CT_LOG("EVP\n");
+            *enc = evp, *md = NULL;
+       } else if (cipher->sp_algorithm_enc == SSL_AES256 &&
+                cipher->sp_algorithm_mac == SSL_SHA1 &&
+                (evp = EVP_get_cipherbyname("AES-256-CBC-HMAC-SHA1"))) {
+            CT_LOG("EVP\n");
+            *enc = evp, *md = NULL;
+       } else if (cipher->sp_algorithm_enc == SSL_AES128 &&
+                cipher->sp_algorithm_mac == SSL_SHA256 &&
+                (evp = EVP_get_cipherbyname("AES-128-CBC-HMAC-SHA256"))) {
+            CT_LOG("EVP\n");
+            *enc = evp, *md = NULL;
+       } else if (cipher->sp_algorithm_enc == SSL_AES256 &&
+                cipher->sp_algorithm_mac == SSL_SHA256 &&
+                (evp = EVP_get_cipherbyname("AES-256-CBC-HMAC-SHA256"))) {
+            CT_LOG("EVP\n");
+            *enc = evp, *md = NULL;
+       }
+
+        assert(*enc != NULL);
+        return 0;
+    }
+
+    return -1;
 }
 
 int
@@ -182,19 +216,18 @@ tls1_setup_key_block(ssl_conn_t *ssl)
     unsigned char       *p = NULL;
     const EVP_CIPHER    *c = NULL;
     const EVP_MD        *hash = NULL;
+    ssl_half_conn_t     *conn = NULL; 
     int                 num = 0;
     int                 mac_type = NID_undef;
     int                 mac_secret_size = 0;
 
-    if (ssl->sc_key_block) {
-        return 0;
-    }
     if (ssl_cipher_get_evp(ssl, &c,  &hash, &mac_type,
-                &mac_secret_size) != 0) {
+                &mac_secret_size, ssl->sc_tlsext_use_etm) != 0) {
         CT_LOG("Get evp failed\n");
         return -1;
     }
 
+    conn = ssl->sc_curr;
     num = EVP_CIPHER_key_length(c) + mac_secret_size + EVP_CIPHER_iv_length(c);
     printf("111 num = %d, keylen = %d, szie = %d, lc = %d\n",
             num, EVP_CIPHER_key_length(c), mac_secret_size, EVP_CIPHER_iv_length(c));
@@ -206,7 +239,7 @@ tls1_setup_key_block(ssl_conn_t *ssl)
 
     ssl->sc_new_hash = hash;
     ssl->sc_evp_cipher = c;
-    ssl->sc_key_block = p;
+    conn->hc_key_block = p;
     ssl->sc_key_block_length = num;
     ssl->sc_mac_type = mac_type;
     ssl->sc_mac_secret_size = mac_secret_size;

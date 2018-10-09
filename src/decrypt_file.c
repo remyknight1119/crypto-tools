@@ -1,11 +1,14 @@
 #include <pcap/pcap.h>
 #include <net/ethernet.h>
 #include <arpa/inet.h>
+#include <stdlib.h>
 
 #include "tool.h"
 #include "proto.h"
 #include "log.h"
+#include "tcp.h"
 #include "ssl.h"
+#include "comm.h"
 
 static void loop_callback(u_char *args, const struct pcap_pkthdr *header,
         const u_char *packet);
@@ -16,6 +19,8 @@ ct_decrypt_file(const char *output, const char *input, const char *key,
     pcap_t              *handle = NULL;
     struct bpf_program  filter = {};
     char                errbuf[PCAP_ERRBUF_SIZE] = {};
+    char                cmd[CT_CMD_BUF_SIZE] = {};
+    int                 ret = 0;
 
     handle = pcap_open_offline(input, errbuf);
     if (handle == NULL) {
@@ -37,6 +42,11 @@ ct_decrypt_file(const char *output, const char *input, const char *key,
         return -1;
     }
 
+    snprintf(cmd, sizeof(cmd), "mkdir -p %s", output);
+    fprintf(stdout, "%s\n", cmd);
+    ret = system(cmd);
+    fprintf(stdout, "cmd ret = %d\n", ret);
+    decrypt_dir = output;
     pcap_loop(handle, -1, loop_callback, NULL);
 
     pcap_close(handle);

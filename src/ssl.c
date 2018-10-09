@@ -119,6 +119,7 @@ ssl_record_proc(ssl_conn_t *ssl, record_t *r, int client)
 
     ssl->sc_curr = client ? &ssl->sc_client : &ssl->sc_server;
     version = ntohs(r->rd_version);
+    ssl->sc_version = version;
     for (i = 0; i < SSL_PROTO_HANDLER_NUM; i++) {
         if (proto_handler[i].pt_version == version) {
             if (r->rd_type >= proto_handler[i].pt_hnum) {

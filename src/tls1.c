@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <openssl/ssl3.h>
+#include <openssl/evp.h>
 
 #include  "ssl.h"
 #include  "log.h"
@@ -13,7 +14,9 @@ static int tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_server_certificate(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_certificate_request(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_server_done(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_certificate_verify(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_client_key_exchange(ssl_conn_t *ssl,
             PACKET *pkt);
@@ -44,9 +47,9 @@ static handshake_proc_f tls1_2_handshake_handler[] = {
     NULL, /* 10 */
     tls1_2_server_certificate, /* 11 */
     NULL, /* 12 */
-    NULL, /* 13 */
+    tls1_2_certificate_request, /* 13 */
     tls1_2_server_done, /* 14 */
-    NULL, /* 15 */
+    tls1_2_certificate_verify, /* 15 */
     tls1_2_client_key_exchange, /* 16 */
     NULL, /* 17 */
     NULL, /* 18 */
@@ -88,6 +91,7 @@ static ssl_extension_t ext_proc[] = {
 static int
 tls1_2_hello_request(ssl_conn_t *ssl, PACKET *pkt)
 {
+    CT_LOG("Renego start\n");
     ssl->sc_renego = 1;
     return 0;
 }
@@ -185,6 +189,12 @@ tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt)
 }
 
 static int
+tls1_2_certificate_request(ssl_conn_t *ssl, PACKET *pkt)
+{
+    return 0;
+}
+
+static int
 tls1_2_server_certificate(ssl_conn_t *ssl, PACKET *pkt)
 {
     return 0;
@@ -192,6 +202,12 @@ tls1_2_server_certificate(ssl_conn_t *ssl, PACKET *pkt)
 
 static int
 tls1_2_server_done(ssl_conn_t *ssl, PACKET *pkt)
+{
+    return 0;
+}
+
+static int
+tls1_2_certificate_verify(ssl_conn_t *ssl, PACKET *pkt)
 {
     return 0;
 }
@@ -224,39 +240,70 @@ tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt)
 static int
 tls1_2_finished(ssl_conn_t *ssl, PACKET *pkt)
 {
+    ssl->sc_renego = 0;
+    //ssl->sc_curr->hc_change_cipher_spec = false;
     return 0;
 }
 
 static int
 tls1_cbc_remove_padding(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
-        int bs, int mac_size, uint16_t *offset)
+        int bs, int mac_size)
 {
     unsigned char   *data = out;
+    unsigned char   padding_len = 0;
 
+    padding_len = data[*olen - 1];
     data += bs;
-    *olen -= bs;
-    *offset = bs;
+    CT_LOG("Padding len = %x, data len = %d\n", padding_len, *olen);
+    if (padding_len >= *olen) {
+        CT_LOG("Padding len error\n");
+        return -1;
+    }
+    *olen -= (bs + padding_len + 1);
 
     memmove(out, data, *olen);
     return 0;
 }
 
 int
-tls1_enc(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
+tls1_enc(ssl_conn_t *ssl, int type, unsigned char *out, uint16_t *olen,
         const unsigned char *in, uint32_t in_len)
 {
     EVP_CIPHER_CTX      *ds = NULL;
-    uint16_t            offset = 0;
+    unsigned char       buf[EVP_AEAD_TLS1_AAD_LEN] = {};
     int                 bs = 0;
+    int                 pad = 0;
+    int                 ret = 0;
 
     ds = ssl->sc_curr->hc_enc_read_ctx;
     bs = EVP_CIPHER_block_size(EVP_CIPHER_CTX_cipher(ds));
-    printf("-----------------------------ds=%p---------bs = %d\n",ds, bs);
+    if (EVP_CIPHER_flags(EVP_CIPHER_CTX_cipher(ds))
+            & EVP_CIPH_FLAG_AEAD_CIPHER) {
+        buf[8] = type;
+        buf[9] = (unsigned char)(ssl->sc_version >> 8);
+        buf[10] = (unsigned char)(ssl->sc_version);
+        buf[11] = in_len >> 8;
+        buf[12] = in_len & 0xff;
+
+        CT_PRINT(buf, (int)sizeof(buf));
+        pad = EVP_CIPHER_CTX_ctrl(ds, EVP_CTRL_AEAD_TLS1_AAD,
+                EVP_AEAD_TLS1_AAD_LEN, &buf[0]);
+        printf("AAAAAAAAAAAAAAAAAAAAAAAa, pad = %d\n", pad);
+    } else {
+        printf("notAAAAAAAAAAAAAAAAAAAAAAAa\n");
+    }
+    printf("--------------------------------------bs = %d\n", bs);
     CT_PRINT(in, in_len);
     EVP_Cipher(ds, out, in, in_len);
+    printf("------------------After decrypt--------------------\n");
+    CT_PRINT(out, in_len);
+    printf("------------------Remove padding--------------------\n");
     *olen = in_len;
-    tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size,
-            &offset);
+    ret = tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size);
+    if (ret < 0) {
+        return ret;
+    }
+    *olen -= pad;
     CT_PRINT(out, *olen);
     printf("--------------------------------------\n");
 
@@ -264,17 +311,22 @@ tls1_enc(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
 }
 
 int
-tls1_get_record(ssl_conn_t *ssl, const unsigned char *in, uint32_t len)
+tls1_get_record(ssl_conn_t *ssl, int type, const unsigned char *in, uint32_t len)
 {
+    EVP_MD_CTX          *hash = NULL;
     uint32_t            clen = len;
 
-    if (ssl->sc_tlsext_use_etm && ssl->sc_read_hash) {
-        clen -= EVP_MD_CTX_size(ssl->sc_read_hash);
+    hash = ssl->sc_curr->hc_read_hash;
+ 
+    if (ssl->sc_tlsext_use_etm && hash) {
+        CT_LOG("use etm = %d, clen = %d\n", ssl->sc_tlsext_use_etm, clen);
+        assert(clen > EVP_MD_CTX_size(hash));
+        clen -= EVP_MD_CTX_size(hash);
     }
 
-    tls1_enc(ssl, ssl->sc_data, &ssl->sc_data_len, in, clen);
+    tls1_enc(ssl, type, ssl->sc_data, &ssl->sc_data_len, in, clen);
 
-    return 0;
+    return len - ssl->sc_data_len;
 }
 
 int
@@ -287,16 +339,23 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
     handshake_proc_f    proc = NULL;
     uint16_t            offset = 0;
     uint32_t            mlen = 0;
-    int                 finish = 0;
+    int                 padding_len = 0;
 
     h = data;
+    if (ssl->sc_renego) {
+        padding_len = tls1_get_record(ssl, SSL3_RT_HANDSHAKE, (void *)h, len);
+        h = (void *)&ssl->sc_data[0];
+        len -= padding_len;
+    }
+ 
     while (offset < len) {
         change_cipher_spec = ssl->sc_curr->hc_change_cipher_spec;
         CT_LOG("server %d, ch = %d\n", !client, change_cipher_spec);
-        if (change_cipher_spec == true) {
-            tls1_get_record(ssl, (void *)h, len - offset);
+        if (change_cipher_spec == true && ssl->sc_renego == 0) {
+            padding_len = tls1_get_record(ssl, SSL3_RT_HANDSHAKE,
+                    (void *)h, len - offset);
             h = (void *)&ssl->sc_data[0];
-            finish = 1;
+            len -= padding_len;
         }
         mlen = ntohl(get_len_3byte(h->hk_len));
         CT_LOG("%s: type = %d, len = %d\n", client?"client":"server",h->hk_type, mlen);
@@ -320,9 +379,6 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
             goto out;
         }
 
-        if (finish) {
-            break;
-        }
         offset += mlen + sizeof(*h);
         h = (void *)((char *)(h + 1) + mlen);
     }
@@ -337,7 +393,8 @@ int
 tls1_2_application_data_proc(ssl_conn_t *ssl, void *data, uint16_t len,
             int lcient)
 {
-    tls1_enc(ssl, ssl->sc_data, &ssl->sc_data_len, data, len);
+    tls1_get_record(ssl, SSL3_RT_APPLICATION_DATA, data, len);
+    fwrite(ssl->sc_data, ssl->sc_data_len, 1, ssl->sc_conn.tp_output);
     return 0;
 }
 
@@ -389,11 +446,20 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
         conn->hc_change_cipher_spec = true;
     }
 
+    if (conn->hc_read_hash) {
+        EVP_MD_CTX_free(conn->hc_read_hash);
+        conn->hc_read_hash = NULL;
+    }
+
+    if (conn->hc_key_block) {
+        free(conn->hc_key_block);
+        conn->hc_key_block = NULL;
+    }
     if (tls1_setup_key_block(ssl) != 0) {
         return -1;
     }
 
-    p = ssl->sc_key_block;
+    p = conn->hc_key_block;
     cl = EVP_CIPHER_key_length(ssl->sc_evp_cipher);
     j = cl;
     i = ssl->sc_mac_secret_size;
@@ -421,16 +487,13 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
         CT_LOG("Init enc failed!\n");
         return -1;
     }
-    if (ssl->sc_read_hash != NULL) {
-        return 0;
-    }
-    ssl->sc_read_hash = EVP_MD_CTX_new();
-    if (ssl->sc_read_hash == NULL) {
+    conn->hc_read_hash = EVP_MD_CTX_new();
+    if (conn->hc_read_hash == NULL) {
         CT_LOG("New MD CTX failed!\n");
         return -1;
     }
 
-    mac_ctx = ssl->sc_read_hash;
+    mac_ctx = conn->hc_read_hash;
     mac_secret = ms;
     mac_key = EVP_PKEY_new_mac_key(ssl->sc_mac_type, NULL,
             mac_secret, ssl->sc_mac_secret_size);
@@ -442,6 +505,9 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     }
 
     CT_LOG("MDSIZE = %d\n", EVP_MD_CTX_size(mac_ctx));
+    if ((EVP_CIPHER_flags(ssl->sc_evp_cipher) & EVP_CIPH_FLAG_AEAD_CIPHER)) {
+        CT_LOG("AEADDDDDDDDDDDDDDDDDDDddd\n");
+    }
 
     return 0;
 }

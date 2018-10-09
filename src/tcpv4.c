@@ -65,12 +65,11 @@ tcp_v4_handler(uint32_t daddr, uint32_t saddr, void *proto_header, uint16_t len)
         if (!th->syn || th->ack) {
             return;
         }
-        conn = tcp_conn_alloc(sizeof(ssl_conn_t));
+        conn = tcp_conn_alloc(key);
         if (conn == NULL) {
             CT_LOG("Alloc tcp conn failed!\n");
             return;
         }
-        conn->tp_conn.ct_key = key;
         conn->tp_conn.ct_state = TCP_STATE_SYN;
         return;
     }

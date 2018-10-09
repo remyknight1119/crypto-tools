@@ -21,6 +21,8 @@ typedef struct _ssl_buffer_t {
 typedef struct _ssl_half_conn_t {
     EVP_CIPHER_CTX      *hc_enc_read_ctx;
     EVP_MD_CTX          *hc_handshake_dgst;
+    EVP_MD_CTX          *hc_read_hash;
+    unsigned char       *hc_key_block;
     bool                hc_change_cipher_spec;
 } ssl_half_conn_t; 
 
@@ -29,6 +31,7 @@ typedef struct _ssl_conn_t {
     ssl_half_conn_t     sc_client;
     ssl_half_conn_t     sc_server;
     ssl_half_conn_t     *sc_curr;
+    int                 sc_version;
     uint8_t             sc_client_random[SSL3_RANDOM_SIZE];
     uint8_t             sc_server_random[SSL3_RANDOM_SIZE];
     uint8_t             sc_data[SSL_PAYLOAD_MAX_LEN];
@@ -42,12 +45,10 @@ typedef struct _ssl_conn_t {
     int                 sc_tlsext_use_etm;
     ssl_cipher_t        *sc_cipher;
     int                 sc_key_block_length;
-    unsigned char       *sc_key_block;
     const EVP_CIPHER    *sc_evp_cipher;
     int                 sc_mac_type;
     int                 sc_mac_secret_size;
     const EVP_MD        *sc_new_hash;
-    EVP_MD_CTX          *sc_read_hash;
 } ssl_conn_t;
 
 extern RSA *rsa_private_key;
