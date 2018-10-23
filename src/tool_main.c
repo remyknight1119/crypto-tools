@@ -13,6 +13,7 @@
 #include "lib.h"
 #include "tool.h"
 #include "proto.h"
+#include "comm.h"
 
 static const char *
 ct_program_version = "1.0.0";//PACKAGE_STRING;
@@ -34,7 +35,8 @@ ct_options[] = {
 	"--output       -o	output file path\n",	
 	"--key          -k	private key file\n",	
 	"--random       -r	random number file\n",	
-	"--filter       -f	filter conditions\n",	
+    "--port         -p  filter port\n",
+	"--filter       -F	use filter\n",	
 	"--help         -H	Print help information\n",	
 };
 
@@ -52,7 +54,7 @@ ct_help(void)
 }
 
 static const char *
-ct_optstring = "Hi:o:k:r:f:";
+ct_optstring = "HFi:o:k:r:p:";
 
 int
 main(int argc, char **argv)  
@@ -62,6 +64,7 @@ main(int argc, char **argv)
     char            *key = NULL;
     char            *random = NULL;
     char            *filter = NULL;
+    char            filter_buf[CT_CMD_BUF_SIZE] = {};
     int             c = 0;
     int             ret = 0;
 
@@ -71,6 +74,10 @@ main(int argc, char **argv)
             case 'H':
                 ct_help();
                 return 0;
+            case 'F':
+                filter = filter_buf;
+                break;
+
             case 'i':
                 input = optarg;
                 break;
@@ -87,8 +94,8 @@ main(int argc, char **argv)
                 random = optarg;
                 break;
 
-            case 'f':
-                filter = optarg;
+            case 'p':
+                snprintf(&filter_buf[0], sizeof(filter_buf), "port %s", optarg);
                 break;
 
             default:

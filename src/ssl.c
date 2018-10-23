@@ -152,9 +152,11 @@ ssl_msg_proc(connection_t *conn, void *record, uint16_t len, int client)
 
     ssl = (void *)conn;
     buffer = client ? &ssl->sc_client_buffer : &ssl->sc_server_buffer;
+    CT_LOG("len = %d, need_len = %d, offset = %d\n", len, buffer->bf_need_len, buffer->bf_offset);
     if (buffer->bf_need_len > 0) {
         wlen = len > buffer->bf_need_len ? buffer->bf_need_len : len;
         memcpy(&buffer->bf_data[buffer->bf_offset], record, wlen);
+        buffer->bf_offset += len;
         buffer->bf_need_len -= wlen;
         len -= wlen;
         if (buffer->bf_need_len > 0) {

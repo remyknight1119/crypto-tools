@@ -29,9 +29,14 @@ ct_decrypt_file(const char *output, const char *input, const char *key,
     }
 
     if (filter_str != NULL) {
-        pcap_compile(handle, &filter, filter_str, 1, 0);
+        if (pcap_compile(handle, &filter, filter_str, 1, 0) != 0) {
+            CT_LOG("Pcap compile \"%s\" failed(%s)\n", filter_str, pcap_geterr(handle));
+            pcap_close(handle);
+            return -1;
+        }
+
         if (pcap_setfilter(handle, &filter) != 0) {
-            CT_LOG("Set filter %s failed(%s)\n", filter_str, errbuf);
+            CT_LOG("Set filter \"%s\" failed(%s)\n", filter_str, pcap_geterr(handle));
             pcap_close(handle);
             return -1;
         }

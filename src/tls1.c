@@ -7,6 +7,7 @@
 #include  "record.h"
 #include  "tls1.h"
 #include  "cipher.h"
+#include  "comm.h"
 
 
 typedef int (*handshake_proc_f)(ssl_conn_t *ssl, PACKET *pkt);
@@ -292,7 +293,7 @@ tls1_enc(ssl_conn_t *ssl, int type, unsigned char *out, uint16_t *olen,
     } else {
         printf("notAAAAAAAAAAAAAAAAAAAAAAAa\n");
     }
-    printf("--------------------------------------bs = %d\n", bs);
+    printf("------------------Before decrypt--------------------\n");
     CT_PRINT(in, in_len);
     EVP_Cipher(ds, out, in, in_len);
     printf("------------------After decrypt--------------------\n");
@@ -391,15 +392,27 @@ out:
 
 int
 tls1_2_application_data_proc(ssl_conn_t *ssl, void *data, uint16_t len,
-            int lcient)
+            int client)
 {
+    char    *side = NULL;
+    char    split_str[CT_CMD_BUF_SIZE] = {};
+
     tls1_get_record(ssl, SSL3_RT_APPLICATION_DATA, data, len);
+    side = client ? "client" : "server";
+    snprintf(split_str, sizeof(split_str),
+            "\n============%s start============\n", side);
+    fwrite(split_str, strlen(split_str), 1, ssl->sc_conn.tp_output);
+
     fwrite(ssl->sc_data, ssl->sc_data_len, 1, ssl->sc_conn.tp_output);
+
+    snprintf(split_str, sizeof(split_str),
+            "\n============%s end[%d]============\n", side, ssl->sc_data_len);
+    fwrite(split_str, strlen(split_str), 1, ssl->sc_conn.tp_output);
     return 0;
 }
 
 int
-tls1_2_alert_proc(ssl_conn_t *ssl, void *data, uint16_t len, int lcient)
+tls1_2_alert_proc(ssl_conn_t *ssl, void *data, uint16_t len, int client)
 {
     return 0;
 }
