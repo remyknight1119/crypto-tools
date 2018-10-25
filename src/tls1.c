@@ -250,18 +250,30 @@ static int
 tls1_cbc_remove_padding(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
         int bs, int mac_size)
 {
-    unsigned char   *data = out;
-    unsigned char   padding_len = 0;
+    EVP_CIPHER_CTX      *ds = NULL;
+    unsigned char       *data = out;
+    unsigned char       padding_len = 0;
 
     padding_len = data[*olen - 1];
-    data += bs;
-    CT_LOG("Padding len = %x, data len = %d\n", padding_len, *olen);
+    if (ssl->sc_explicit_iv) {
+        data += bs;
+        *olen -= bs;
+    }
+    CT_LOG("Padding len = %d, data len = %d, bs = %d\n",
+            padding_len, *olen, bs);
     if (padding_len >= *olen) {
         CT_LOG("Padding len error\n");
         return -1;
     }
-    *olen -= (bs + padding_len + 1);
 
+    ds = ssl->sc_curr->hc_enc_read_ctx;
+    if (EVP_CIPHER_flags(EVP_CIPHER_CTX_cipher(ds)) &
+            EVP_CIPH_FLAG_AEAD_CIPHER) {
+        CT_LOG("AEADDDDDCCCCCCCCCCCCCCCCCCCCCCCCCCC\n");
+        *olen -= (padding_len + 1);
+    }
+
+    CT_LOG("olen = %d\n", *olen);
     memmove(out, data, *olen);
     return 0;
 }
@@ -289,7 +301,7 @@ tls1_enc(ssl_conn_t *ssl, int type, unsigned char *out, uint16_t *olen,
         CT_PRINT(buf, (int)sizeof(buf));
         pad = EVP_CIPHER_CTX_ctrl(ds, EVP_CTRL_AEAD_TLS1_AAD,
                 EVP_AEAD_TLS1_AAD_LEN, &buf[0]);
-        printf("AAAAAAAAAAAAAAAAAAAAAAAa, pad = %d\n", pad);
+        printf("AAAAAAAAAAAAAAAAAAAAAAAa, pad = %d, in_len = %d\n", pad, in_len);
     } else {
         printf("notAAAAAAAAAAAAAAAAAAAAAAAa\n");
     }

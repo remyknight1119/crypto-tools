@@ -4,6 +4,7 @@
 
 #include <openssl/rsa.h>
 #include <openssl/ssl.h>
+#include <openssl/tls1.h>
 #include <openssl/comp.h>
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
@@ -13,6 +14,25 @@
 #include "tls1.h"
 #include "cipher.h"
 #include "log.h"
+
+static const EVP_MD *
+tls1_get_md(ssl_conn_t *ssl)
+{
+    int         md_nid = 0;
+
+    md_nid = ssl->sc_cipher->sp_md_nid;
+    if (ssl->sc_version < TLS1_2_VERSION) {
+        switch (md_nid) {
+            case NID_sha256:
+                md_nid = NID_md5_sha1;
+                break;
+            default:
+                break;
+        }
+    }
+
+    return EVP_get_digestbynid(md_nid);
+}
 
 /* seed1 through seed5 are concatenated */
 static int
@@ -25,8 +45,9 @@ tls1_PRF(ssl_conn_t *ssl,
             const unsigned char *sec, int slen,
             unsigned char *out, int olen)
 {
-    const EVP_MD *md = EVP_get_digestbynid(ssl->sc_cipher->sp_md_nid);
+    const EVP_MD *md = tls1_get_md(ssl);
     EVP_PKEY_CTX *pctx = NULL;
+    int *type = (int *)md;
 
     int ret = -1;
     size_t outlen = olen;
@@ -36,6 +57,7 @@ tls1_PRF(ssl_conn_t *ssl,
         CT_LOG("Get MD(%d) failed!\n", ssl->sc_cipher->sp_md_nid);
         return -1;
     }
+    printf("md->type = %d, md->pkey_type = %d\n", *type, *(type + 1));
     CT_LOG("NID = %d\n", ssl->sc_cipher->sp_md_nid);
     if (seed1)
         CT_PRINT(seed1, seed1_len);
@@ -194,7 +216,7 @@ ssl_cipher_get_evp(const ssl_conn_t *ssl, const EVP_CIPHER **enc,
        } else if (cipher->sp_algorithm_enc == SSL_AES128 &&
                 cipher->sp_algorithm_mac == SSL_SHA256 &&
                 (evp = EVP_get_cipherbyname("AES-128-CBC-HMAC-SHA256"))) {
-            CT_LOG("EVP\n");
+            CT_LOG("EVP, sha256\n");
             *enc = evp, *md = NULL;
        } else if (cipher->sp_algorithm_enc == SSL_AES256 &&
                 cipher->sp_algorithm_mac == SSL_SHA256 &&

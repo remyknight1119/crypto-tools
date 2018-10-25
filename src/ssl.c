@@ -120,6 +120,7 @@ ssl_record_proc(ssl_conn_t *ssl, record_t *r, int client)
     ssl->sc_curr = client ? &ssl->sc_client : &ssl->sc_server;
     version = ntohs(r->rd_version);
     ssl->sc_version = version;
+    ssl->sc_explicit_iv = (version == TLS1_2_VERSION);
     for (i = 0; i < SSL_PROTO_HANDLER_NUM; i++) {
         if (proto_handler[i].pt_version == version) {
             if (r->rd_type >= proto_handler[i].pt_hnum) {
@@ -152,7 +153,6 @@ ssl_msg_proc(connection_t *conn, void *record, uint16_t len, int client)
 
     ssl = (void *)conn;
     buffer = client ? &ssl->sc_client_buffer : &ssl->sc_server_buffer;
-    CT_LOG("len = %d, need_len = %d, offset = %d\n", len, buffer->bf_need_len, buffer->bf_offset);
     if (buffer->bf_need_len > 0) {
         wlen = len > buffer->bf_need_len ? buffer->bf_need_len : len;
         memcpy(&buffer->bf_data[buffer->bf_offset], record, wlen);

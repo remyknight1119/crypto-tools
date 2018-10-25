@@ -36,6 +36,7 @@ typedef struct _ssl_conn_t {
     uint8_t             sc_server_random[SSL3_RANDOM_SIZE];
     uint8_t             sc_data[SSL_PAYLOAD_MAX_LEN];
     bool                sc_renego;
+    bool                sc_explicit_iv;
     ssl_buffer_t        sc_client_buffer;
     ssl_buffer_t        sc_server_buffer;
     uint16_t            sc_data_len;
