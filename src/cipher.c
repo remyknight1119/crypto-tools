@@ -98,14 +98,25 @@ tls1_PRF(ssl_conn_t *ssl,
 }
 
 int
-tls1_digest_cached_records(ssl_conn_t *ssl, int keep)
+tls1_digest_cached_records(ssl_conn_t *ssl)
 {
     EVP_MD_CTX          **dgst = NULL;
+    const EVP_MD        *md = NULL;
+    void                *hdata = NULL;
+    uint32_t            hlen = 0;
 
     dgst = &ssl->sc_curr->hc_handshake_dgst;
     if (*dgst == NULL) {
+        hdata = ssl->sc_handshake_msg;
+        hlen = ssl->sc_handshake_msg_offset;
+        //CT_PRINT(hdata, hlen);
         *dgst = EVP_MD_CTX_new();
         if (*dgst == NULL) {
+            return -1;
+        }
+        md = tls1_get_md(ssl);
+        if (md == NULL || !EVP_DigestInit_ex(*dgst, md, NULL) ||
+                !EVP_DigestUpdate(*dgst, hdata, hlen)) {
             return -1;
         }
     }
@@ -114,12 +125,46 @@ tls1_digest_cached_records(ssl_conn_t *ssl, int keep)
 }
 
 int
+tls1_handshake_hash(ssl_conn_t *ssl, unsigned char *out, size_t outlen,
+         size_t *hashlen)
+{
+    EVP_MD_CTX  *ctx = NULL;
+    EVP_MD_CTX  *dgst = NULL;
+    int         hashleni = 0;
+    int         ret = -1;
+
+    dgst = ssl->sc_curr->hc_handshake_dgst;
+    hashleni = EVP_MD_CTX_size(dgst);
+    if (hashleni < 0 || (size_t)hashleni > outlen) {
+        CT_LOG("hash len error!\n");
+        goto err;
+    }
+
+    ctx = EVP_MD_CTX_new();
+    if (ctx == NULL) {
+        goto err;
+    }
+
+    if (!EVP_MD_CTX_copy_ex(ctx, dgst) ||
+            EVP_DigestFinal_ex(ctx, out, NULL) <= 0) {
+        CT_LOG("Evp failed!\n");
+        goto err;
+    }
+    *hashlen = hashleni;
+
+    ret = 0;
+err:
+    EVP_MD_CTX_free(ctx);
+    return ret;
+}
+
+int
 tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
 {
     RSA                     *rsa = rsa_private_key;
     uint16_t                *len = pkt->data;
     const unsigned char     *p = NULL;
-    int                     hashlen = 0;
+    size_t                  hashlen = 0;
     unsigned char           hash[EVP_MAX_MD_SIZE * 2] = {};
     int                     decrypt_len = 0;
     int                     padding_len = 0;
@@ -145,12 +190,18 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
     p = (void *)&secret.pm_pre_master[padding_len];
 
     CT_LOG("\n===================================================\n");
-#if 0
-    assert(ssl->sc_ext_master_secret == 0);
     if (ssl->sc_ext_master_secret) {
-#else
-    if (0) {
-#endif
+        if (tls1_digest_cached_records(ssl) != 0) {
+            CT_LOG("tls1_digest_cached_records failed!\n");
+            return -1;
+        }
+        
+        if (tls1_handshake_hash(ssl, hash, sizeof(hash),
+                &hashlen) != 0) {
+            CT_LOG("tls1_handshake_hash failed!\n");
+            return -1;
+        }
+        CT_PRINT(hash, (int)hashlen);
         tls1_PRF(ssl,
             TLS_MD_EXTENDED_MASTER_SECRET_CONST,
             TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE,

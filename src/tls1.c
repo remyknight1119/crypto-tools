@@ -242,6 +242,7 @@ static int
 tls1_2_finished(ssl_conn_t *ssl, PACKET *pkt)
 {
     ssl->sc_renego = 0;
+    ssl->sc_handshake_msg_offset = 0;
     //ssl->sc_curr->hc_change_cipher_spec = false;
     return 0;
 }
@@ -267,7 +268,7 @@ tls1_cbc_remove_padding(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
     }
 
     ds = ssl->sc_curr->hc_enc_read_ctx;
-    if (EVP_CIPHER_flags(EVP_CIPHER_CTX_cipher(ds)) &
+    if (1 || EVP_CIPHER_flags(EVP_CIPHER_CTX_cipher(ds)) &
             EVP_CIPH_FLAG_AEAD_CIPHER) {
         CT_LOG("AEADDDDDCCCCCCCCCCCCCCCCCCCCCCCCCCC\n");
         *olen -= (padding_len + 1);
@@ -361,6 +362,11 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
         len -= padding_len;
     }
  
+    if (h->hk_type <= SSL3_MT_CLIENT_KEY_EXCHANGE) {
+        memcpy(&ssl->sc_handshake_msg[ssl->sc_handshake_msg_offset], h, len);
+        ssl->sc_handshake_msg_offset += len;
+    }
+
     while (offset < len) {
         change_cipher_spec = ssl->sc_curr->hc_change_cipher_spec;
         CT_LOG("server %d, ch = %d\n", !client, change_cipher_spec);
@@ -413,13 +419,13 @@ tls1_2_application_data_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     side = client ? "client" : "server";
     snprintf(split_str, sizeof(split_str),
             "\n============%s start============\n", side);
-    fwrite(split_str, strlen(split_str), 1, ssl->sc_conn.tp_output);
+    //fwrite(split_str, strlen(split_str), 1, ssl->sc_conn.tp_output);
 
     fwrite(ssl->sc_data, ssl->sc_data_len, 1, ssl->sc_conn.tp_output);
 
     snprintf(split_str, sizeof(split_str),
             "\n============%s end[%d]============\n", side, ssl->sc_data_len);
-    fwrite(split_str, strlen(split_str), 1, ssl->sc_conn.tp_output);
+    //fwrite(split_str, strlen(split_str), 1, ssl->sc_conn.tp_output);
     return 0;
 }
 
