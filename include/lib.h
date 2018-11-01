@@ -25,4 +25,6 @@
 
 #define CT_ARRAY_SIZE(array)    (sizeof(array)/sizeof(array[0]))
 
+extern void str_to_hex(uint8_t *dest, const char *src, int len);
+
 #endif

@@ -144,14 +144,26 @@ tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt)
     client_hello_t      *h = (void *)pkt->curr;
     uint8_t             *p = NULL;
     uint8_t             *comp_len = NULL;
+    random_master_key_t *key = NULL;
     uint16_t            cipher_len = 0;
     uint16_t            ext_len = 0;
 
     assert(pkt->remaining >= sizeof(*h));
+
+    CT_LOG("clientrandom:");
+    CT_PRINT(&h->ch_random, (int)sizeof(h->ch_random));
+    if (ssl->sc_use_random_log) {
+        key = find_random_premaster_key_pair((void *)&h->ch_random,
+                sizeof(h->ch_random));
+        if (key == NULL) {
+            CT_LOG("Find key failed!\n");
+            return -1;
+        }
+        CT_LOG("Find key OK!\n");
+        ssl->sc_pre_master_key = key;
+    }
     memcpy(ssl->sc_client_random, &h->ch_random,
             sizeof(ssl->sc_client_random));
-    CT_LOG("clientrandom:");
-    CT_PRINT(h->ch_random.rm_random_bytes, (int)sizeof(ssl->sc_client_random));
     p = (void *)&h->ch_session_id[0];
     p += h->ch_session_id_len;
     cipher_len = ntohs(*((uint16_t *)p));
@@ -181,7 +193,7 @@ tls1_2_server_hello(ssl_conn_t *ssl, PACKET *pkt)
 
     ssl->sc_cipher = ssl_get_cipher_by_id(cipher);
     if (ssl->sc_cipher == NULL) {
-        CT_LOG("Unsupport cipher %d\n", cipher);
+        CT_LOG("Unsupport cipher %x\n", cipher);
         return -1;
     }
 
@@ -404,7 +416,7 @@ tls1_2_handshake_proc(ssl_conn_t *ssl, void *data,
 
     return 0;
 out:
-    connection_free((connection_t *)ssl);
+    tcp_conn_free((void *)ssl);
     return -1;
 }
 

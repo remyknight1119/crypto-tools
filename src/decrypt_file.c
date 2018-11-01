@@ -42,7 +42,7 @@ ct_decrypt_file(const char *output, const char *input, const char *key,
         }
     } 
 
-    if (ssl_init(key) != 0) {
+    if (ssl_init(key, random) != 0) {
         CT_LOG("SSL init failed\n");
         return -1;
     }

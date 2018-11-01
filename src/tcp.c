@@ -47,10 +47,10 @@ tcp_conn_alloc(connection_key_t key)
 }
 
 void
-tcp_conn_free(tcp_conn_t *conn)
+tcp_conn_free(tcp_conn_t *tp)
 {
-    if (conn->tp_output) {
-        fclose(conn->tp_output);
+    if (tp->tp_output) {
+        fclose(tp->tp_output);
     }
-    connection_free((connection_t *)conn);
+    connection_free((connection_t *)tp);
 }

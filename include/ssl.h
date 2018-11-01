@@ -26,11 +26,18 @@ typedef struct _ssl_half_conn_t {
     bool                hc_change_cipher_spec;
 } ssl_half_conn_t; 
 
+typedef struct _random_master_key_t {
+    struct list_head    list;
+    uint8_t             random[sizeof(random_t)];
+    uint8_t             master_key[SSL_MAX_MASTER_KEY_LENGTH];
+} random_master_key_t;
+
 typedef struct _ssl_conn_t {
     tcp_conn_t          sc_conn;
     ssl_half_conn_t     sc_client;
     ssl_half_conn_t     sc_server;
     ssl_half_conn_t     *sc_curr;
+    random_master_key_t *sc_pre_master_key;
     int                 sc_version;
     uint8_t             sc_client_random[SSL3_RANDOM_SIZE];
     uint8_t             sc_server_random[SSL3_RANDOM_SIZE];
@@ -39,6 +46,7 @@ typedef struct _ssl_conn_t {
     uint32_t            sc_handshake_msg_offset;
     bool                sc_renego;
     bool                sc_explicit_iv;
+    bool                sc_use_random_log;
     ssl_buffer_t        sc_client_buffer;
     ssl_buffer_t        sc_server_buffer;
     uint16_t            sc_data_len;
@@ -59,9 +67,11 @@ extern RSA *rsa_private_key;
 typedef int (*record_proc_f)(ssl_conn_t *conn, void *data,
             uint16_t len, int client);
 
-extern void ssl_msg_proc(connection_t *conn, void *record,
+extern int ssl_msg_proc(tcp_conn_t *conn, void *record,
         uint16_t len, int client);
 extern ssl_cipher_t *ssl_get_cipher_by_id(uint32_t id);
-extern int ssl_init(const char *file);
+extern int ssl_init(const char *file, const char *random);
+extern random_master_key_t *find_random_premaster_key_pair(uint8_t *random,
+        size_t len);
 
 #endif
