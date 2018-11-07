@@ -292,6 +292,8 @@ tls1_cbc_remove_padding(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
         data += bs;
         *olen -= bs;
     }
+    ds = ssl->sc_curr->hc_enc_read_ctx;
+
     CT_LOG("Padding len = %d, data len = %d, bs = %d\n",
             padding_len, *olen, bs);
     if (padding_len >= *olen) {
@@ -299,7 +301,6 @@ tls1_cbc_remove_padding(ssl_conn_t *ssl, unsigned char *out, uint16_t *olen,
         return -1;
     }
 
-    ds = ssl->sc_curr->hc_enc_read_ctx;
     if (1 || EVP_CIPHER_flags(EVP_CIPHER_CTX_cipher(ds)) &
             EVP_CIPH_FLAG_AEAD_CIPHER) {
         CT_LOG("AEADDDDDCCCCCCCCCCCCCCCCCCCCCCCCCCC\n");
@@ -316,6 +317,7 @@ tls1_enc(ssl_conn_t *ssl, int type, unsigned char *out, uint16_t *olen,
         const unsigned char *in, uint32_t in_len)
 {
     EVP_CIPHER_CTX      *ds = NULL;
+    const EVP_CIPHER    *enc = NULL;
     unsigned char       buf[EVP_AEAD_TLS1_AAD_LEN] = {};
     int                 bs = 0;
     int                 pad = 0;
@@ -340,14 +342,28 @@ tls1_enc(ssl_conn_t *ssl, int type, unsigned char *out, uint16_t *olen,
     }
     printf("------------------Before decrypt--------------------\n");
     CT_PRINT(in, in_len);
-    EVP_Cipher(ds, out, in, in_len);
-    printf("------------------After decrypt--------------------\n");
+    memcpy(out, in, in_len);
+    ret = EVP_Cipher(ds, out, out, in_len);
+    printf("------------------After decrypt--------------------bs = %d, in = %p\n", bs, in);
     CT_PRINT(out, in_len);
     printf("------------------Remove padding--------------------\n");
     *olen = in_len;
-    ret = tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size);
-    if (ret < 0) {
-        return ret;
+
+    enc = EVP_CIPHER_CTX_cipher(ds);
+    if (EVP_CIPHER_mode(enc) == EVP_CIPH_GCM_MODE) {
+        CT_LOG("GCM, offset = %d\n", EVP_GCM_TLS_EXPLICIT_IV_LEN);
+        *olen -= EVP_GCM_TLS_EXPLICIT_IV_LEN;
+        memmove(out, out + EVP_GCM_TLS_EXPLICIT_IV_LEN, *olen);
+    } else if (EVP_CIPHER_mode(enc) == EVP_CIPH_CCM_MODE) {
+        *olen -= EVP_CCM_TLS_EXPLICIT_IV_LEN;
+        memmove(out, out + EVP_CCM_TLS_EXPLICIT_IV_LEN, *olen);
+    }
+
+    if (bs != 1) {
+        ret = tls1_cbc_remove_padding(ssl, out, olen, bs, ssl->sc_mac_secret_size);
+        if (ret < 0) {
+            return ret;
+        }
     }
     *olen -= pad;
     CT_PRINT(out, *olen);
