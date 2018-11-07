@@ -21,6 +21,7 @@ typedef struct _pre_master_secret_t {
 struct _ssl_conn_t;
 
 extern int tls_process_cke_rsa(struct _ssl_conn_t *ssl, PACKET *pkt);
+extern int tls_process_cke_use_log(struct _ssl_conn_t *ssl, PACKET *pkt);
 extern int tls1_setup_key_block(struct _ssl_conn_t *ssl);
 
 #endif

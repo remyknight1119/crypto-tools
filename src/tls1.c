@@ -21,7 +21,10 @@ static int tls1_2_certificate_verify(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_new_session_ticket(ssl_conn_t *ssl, PACKET *pkt);
 static int tls1_2_client_key_exchange(ssl_conn_t *ssl,
             PACKET *pkt);
+static int tls1_2_server_key_exchange(ssl_conn_t *ssl,
+            PACKET *pkt);
 static int tls1_2_finished(ssl_conn_t *ssl, PACKET *pkt);
+static int tls1_2_certificate_status(ssl_conn_t *ssl, PACKET *pkt);
 
 typedef struct _ssl_key_t {
     uint32_t    ky_key;
@@ -47,7 +50,7 @@ static handshake_proc_f tls1_2_handshake_handler[] = {
     NULL, /* 9 */
     NULL, /* 10 */
     tls1_2_server_certificate, /* 11 */
-    NULL, /* 12 */
+    tls1_2_server_key_exchange, /* 12 */
     tls1_2_certificate_request, /* 13 */
     tls1_2_server_done, /* 14 */
     tls1_2_certificate_verify, /* 15 */
@@ -57,7 +60,7 @@ static handshake_proc_f tls1_2_handshake_handler[] = {
     NULL, /* 19 */
     tls1_2_finished, /* 20 */
     NULL, /* 21 */
-    NULL, /* 22 */
+    tls1_2_certificate_status, /* 22 */
 };
 
 #define TLS1_2_HANDSHAKE_HANDLER_NUM    CT_ARRAY_SIZE(tls1_2_handshake_handler)
@@ -66,6 +69,10 @@ static ssl_key_t key_proc[] = {
     {
         .ky_key = SSL_kRSA,
         .ky_process_key = tls_process_cke_rsa,
+    },
+    {
+        .ky_key = SSL_kECDHE,
+        .ky_process_key = tls_process_cke_use_log,
     },
 };
 
@@ -160,7 +167,7 @@ tls1_2_client_hello(ssl_conn_t *ssl, PACKET *pkt)
             return -1;
         }
         CT_LOG("Find key OK!\n");
-        ssl->sc_pre_master_key = key;
+        ssl->sc_random_master_key = key;
     }
     memcpy(ssl->sc_client_random, &h->ch_random,
             sizeof(ssl->sc_client_random));
@@ -236,12 +243,19 @@ tls1_2_client_key_exchange(ssl_conn_t *ssl, PACKET *pkt)
     }
 
     for (i = 0; i < TLS1_KEY_PROC_NUM; i++) {
+        CT_LOG("ALG key = %x\n", cipher->sp_algorithm_mkey);
         if (key_proc[i].ky_key & cipher->sp_algorithm_mkey) {
             return key_proc[i].ky_process_key(ssl, pkt);
         }
     }
 
     return -1;
+}
+
+static int
+tls1_2_server_key_exchange(ssl_conn_t *ssl, PACKET *pkt)
+{
+    return 0;
 }
 
 static int
@@ -256,6 +270,12 @@ tls1_2_finished(ssl_conn_t *ssl, PACKET *pkt)
     ssl->sc_renego = 0;
     ssl->sc_handshake_msg_offset = 0;
     //ssl->sc_curr->hc_change_cipher_spec = false;
+    return 0;
+}
+
+static int
+tls1_2_certificate_status(ssl_conn_t *ssl, PACKET *pkt)
+{
     return 0;
 }
 
@@ -447,29 +467,14 @@ tls1_2_alert_proc(ssl_conn_t *ssl, void *data, uint16_t len, int client)
     return 0;
 }
 
-static int
-tls1_2_init_enc_read(ssl_conn_t *ssl, EVP_CIPHER_CTX **dd, unsigned char *key,
-        unsigned char *iv, int n)
-{
-    if ((*dd = EVP_CIPHER_CTX_new()) == NULL) {
-        CT_LOG("New CTX failed!\n");
-        return -1;
-    }
-    assert(n <= ssl->sc_key_block_length);
-    if (!EVP_CipherInit_ex(*dd, ssl->sc_evp_cipher, NULL, key, iv, 0)) {
-        CT_LOG("EVP_CipherInit_ex failed!\n");
-        return -1;
-    }
-
-    return 0;
-}
-
 int
 tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
             int client)
 {
     EVP_MD_CTX          *mac_ctx = NULL;
     EVP_PKEY            *mac_key = NULL;
+    EVP_CIPHER_CTX      *dd = NULL;
+    const EVP_CIPHER    *c = NULL;
     ssl_half_conn_t     *conn = NULL; 
     uint8_t             *type = data;
     unsigned char       *ms = NULL;
@@ -482,7 +487,6 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     int                 j = 0;
     int                 k = 0;
     int                 n = 0;
-    int                 ret = 0;
 
     conn = ssl->sc_curr;
     if (*type == TLS1_CHANGE_CIPHER_SPEC_TYPE_CHANGE_CIPHER_SPEC) {
@@ -506,7 +510,14 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     cl = EVP_CIPHER_key_length(ssl->sc_evp_cipher);
     j = cl;
     i = ssl->sc_mac_secret_size;
-    k = EVP_CIPHER_iv_length(ssl->sc_evp_cipher);
+    c = ssl->sc_evp_cipher;
+    if (EVP_CIPHER_mode(c) == EVP_CIPH_GCM_MODE) {
+        k = EVP_GCM_TLS_FIXED_IV_LEN;
+    } else if (EVP_CIPHER_mode(c) == EVP_CIPH_CCM_MODE) {
+        k = EVP_CCM_TLS_FIXED_IV_LEN;
+    } else {
+        k = EVP_CIPHER_iv_length(c);
+    }
     CT_LOG("change cipher type = %d, cl = %d, k = %d\n", *type, cl, k);
     if (client) {
         ms = &(p[0]);
@@ -525,11 +536,11 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
         n += k;
     }
 
-    ret = tls1_2_init_enc_read(ssl, &conn->hc_enc_read_ctx, key, iv, n);
-    if (ret < 0) {
-        CT_LOG("Init enc failed!\n");
+    if ((conn->hc_enc_read_ctx = EVP_CIPHER_CTX_new()) == NULL) {
+        CT_LOG("New CTX failed!\n");
         return -1;
     }
+
     conn->hc_read_hash = EVP_MD_CTX_new();
     if (conn->hc_read_hash == NULL) {
         CT_LOG("New MD CTX failed!\n");
@@ -537,20 +548,44 @@ tls1_2_change_cipher_spec_proc(ssl_conn_t *ssl, void *data, uint16_t len,
     }
 
     mac_ctx = conn->hc_read_hash;
+    dd = conn->hc_enc_read_ctx;
     mac_secret = ms;
     mac_key = EVP_PKEY_new_mac_key(ssl->sc_mac_type, NULL,
             mac_secret, ssl->sc_mac_secret_size);
+    if ((EVP_CIPHER_flags(ssl->sc_evp_cipher) & EVP_CIPH_FLAG_AEAD_CIPHER)) {
+        CT_LOG("AEADDDDDDDDDDDDDDDDDDDddd\n");
+    }
+
+    if (EVP_CIPHER_mode(ssl->sc_evp_cipher) == EVP_CIPH_GCM_MODE) {
+        CT_LOG("GGGGGGGGGGGGGGCM MODE\n");
+        if (!EVP_CipherInit_ex(dd, ssl->sc_evp_cipher, NULL, key, NULL, 0)) {
+            CT_LOG("Cipher init failed! id = %d, e nid = %d\n",
+                    EVP_CIPHER_CTX_nid(dd), EVP_CIPHER_nid(ssl->sc_evp_cipher));
+            return -1;
+        }
+
+        if (!EVP_CIPHER_CTX_ctrl(dd, EVP_CTRL_GCM_SET_IV_FIXED, (int)k, iv)) {
+            CT_LOG("Cipher CTX ctrl failed! id = %d, e nid = %d\n",
+                    EVP_CIPHER_CTX_nid(dd), EVP_CIPHER_nid(ssl->sc_evp_cipher));
+            return -1;
+        }
+        return 0;
+    }
+
+    assert(n <= ssl->sc_key_block_length);
+    if (!EVP_CipherInit_ex(dd, ssl->sc_evp_cipher, NULL, key, iv, 0)) {
+        CT_LOG("EVP_CipherInit_ex failed!\n");
+        return -1;
+    }
+
     if (mac_key == NULL ||
             EVP_DigestSignInit(mac_ctx, NULL, ssl->sc_new_hash,
                 NULL, mac_key) <= 0) {
-        CT_LOG("Mac key failed!\n");
+        CT_LOG("Mac key failed! mac type = %d\n", ssl->sc_mac_type);
         return -1;
     }
 
     CT_LOG("MDSIZE = %d\n", EVP_MD_CTX_size(mac_ctx));
-    if ((EVP_CIPHER_flags(ssl->sc_evp_cipher) & EVP_CIPH_FLAG_AEAD_CIPHER)) {
-        CT_LOG("AEADDDDDDDDDDDDDDDDDDDddd\n");
-    }
 
     return 0;
 }

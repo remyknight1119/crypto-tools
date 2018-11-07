@@ -158,14 +158,74 @@ err:
     return ret;
 }
 
+static int
+tls_generate_master_secret(ssl_conn_t *ssl, const unsigned char *p, int len)
+{
+    size_t                  hashlen = 0;
+    unsigned char           hash[EVP_MAX_MD_SIZE * 2] = {};
+
+    CT_LOG("\n===================================================\n");
+    if (ssl->sc_ext_master_secret) {
+        if (tls1_digest_cached_records(ssl) != 0) {
+            CT_LOG("tls1_digest_cached_records failed!\n");
+            return -1;
+        }
+        
+        if (tls1_handshake_hash(ssl, hash, sizeof(hash),
+                &hashlen) != 0) {
+            CT_LOG("tls1_handshake_hash failed!\n");
+            return -1;
+        }
+        CT_PRINT(hash, (int)hashlen);
+        tls1_PRF(ssl,
+            TLS_MD_EXTENDED_MASTER_SECRET_CONST,
+            TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE,
+            hash, hashlen,
+            NULL, 0,
+            NULL, 0,
+            NULL, 0, p, len, ssl->sc_master_key,
+            SSL_MAX_MASTER_KEY_LENGTH);
+        CT_LOG("ext master secret:\n");
+    } else {
+        tls1_PRF(ssl,
+            TLS_MD_MASTER_SECRET_CONST,
+            TLS_MD_MASTER_SECRET_CONST_SIZE,
+            ssl->sc_client_random, SSL3_RANDOM_SIZE,
+            NULL, 0,
+            ssl->sc_server_random, SSL3_RANDOM_SIZE,
+            NULL, 0, p, len, ssl->sc_master_key,
+            SSL_MAX_MASTER_KEY_LENGTH);
+        CT_LOG("Generate master key:\n");
+    }
+
+    ssl->sc_master_key_length = SSL_MAX_MASTER_KEY_LENGTH;
+    CT_PRINT(ssl->sc_master_key, ssl->sc_master_key_length);
+    CT_LOG("\n===================================================\n");
+
+    return 0;
+}
+
+int
+tls_process_cke_use_log(ssl_conn_t *ssl, PACKET *pkt)
+{
+    if (ssl->sc_random_master_key == NULL) {
+        CT_LOG("Pre Master Key is NULL\n");
+        return -1;
+    }
+
+    memcpy(ssl->sc_master_key, ssl->sc_random_master_key->master_key,
+            sizeof(ssl->sc_master_key));
+
+    ssl->sc_master_key_length = sizeof(ssl->sc_master_key);
+    return 0;
+}
+
 int
 tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
 {
     RSA                     *rsa = rsa_private_key;
     uint16_t                *len = pkt->data;
     const unsigned char     *p = NULL;
-    size_t                  hashlen = 0;
-    unsigned char           hash[EVP_MAX_MD_SIZE * 2] = {};
     int                     decrypt_len = 0;
     int                     padding_len = 0;
     pre_master_secret_t     secret = {};
@@ -189,49 +249,11 @@ tls_process_cke_rsa(ssl_conn_t *ssl, PACKET *pkt)
     padding_len = decrypt_len - SSL_MAX_MASTER_KEY_LENGTH;
     p = (void *)&secret.pm_pre_master[padding_len];
 
-    CT_LOG("\n===================================================\n");
-    if (ssl->sc_ext_master_secret) {
-        if (tls1_digest_cached_records(ssl) != 0) {
-            CT_LOG("tls1_digest_cached_records failed!\n");
-            return -1;
-        }
-        
-        if (tls1_handshake_hash(ssl, hash, sizeof(hash),
-                &hashlen) != 0) {
-            CT_LOG("tls1_handshake_hash failed!\n");
-            return -1;
-        }
-        CT_PRINT(hash, (int)hashlen);
-        tls1_PRF(ssl,
-            TLS_MD_EXTENDED_MASTER_SECRET_CONST,
-            TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE,
-            hash, hashlen,
-            NULL, 0,
-            NULL, 0,
-            NULL, 0, p, SSL_MAX_MASTER_KEY_LENGTH, ssl->sc_master_key,
-            SSL_MAX_MASTER_KEY_LENGTH);
-        CT_LOG("ext master secret:\n");
-    } else {
-        tls1_PRF(ssl,
-            TLS_MD_MASTER_SECRET_CONST,
-            TLS_MD_MASTER_SECRET_CONST_SIZE,
-            ssl->sc_client_random, SSL3_RANDOM_SIZE,
-            NULL, 0,
-            ssl->sc_server_random, SSL3_RANDOM_SIZE,
-            NULL, 0, p, SSL_MAX_MASTER_KEY_LENGTH, ssl->sc_master_key,
-            SSL_MAX_MASTER_KEY_LENGTH);
-        CT_LOG("Generate master key:\n");
-    }
-
-    ssl->sc_master_key_length = SSL_MAX_MASTER_KEY_LENGTH;
-    CT_PRINT(ssl->sc_master_key, ssl->sc_master_key_length);
-    CT_LOG("\n===================================================\n");
-
-    return 0;
+    return tls_generate_master_secret(ssl, p, SSL_MAX_MASTER_KEY_LENGTH);
 }
 
 int
-ssl_cipher_get_evp(const ssl_conn_t *ssl, const EVP_CIPHER **enc,
+ssl_cipher_get_evp(ssl_conn_t *ssl, const EVP_CIPHER **enc,
     const EVP_MD **md, int *mac_pkey_type, int *mac_secret_size,
     int use_etm)
 {
@@ -244,10 +266,18 @@ ssl_cipher_get_evp(const ssl_conn_t *ssl, const EVP_CIPHER **enc,
         return -1;
     }
     *md = EVP_get_digestbynid(cipher->sp_mac_nid);
+    if (cipher->sp_algorithm_mac == SSL_AEAD) {
+        mac_pkey_type = NULL;
+        *mac_secret_size = 0;
+        *md = NULL;
+        ssl->sc_tlsext_use_etm = 0;
+        use_etm = 0;
+    } else {
+        *mac_pkey_type = EVP_PKEY_HMAC;
+        *mac_secret_size = EVP_MD_size(*md);
+    }
+        
     CT_LOG("md nid = %d\n", cipher->sp_mac_nid);
-    assert(*md != NULL);
-    *mac_secret_size = EVP_MD_size(*md);
-    *mac_pkey_type = EVP_PKEY_HMAC;
     if ((*enc != NULL) && (*md != NULL || (EVP_CIPHER_flags(*enc) & EVP_CIPH_FLAG_AEAD_CIPHER))) {
         CT_LOG("EEEEEEEEEEEEEEEEEEEEee\n");
         if (use_etm) {

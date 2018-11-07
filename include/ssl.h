@@ -37,7 +37,7 @@ typedef struct _ssl_conn_t {
     ssl_half_conn_t     sc_client;
     ssl_half_conn_t     sc_server;
     ssl_half_conn_t     *sc_curr;
-    random_master_key_t *sc_pre_master_key;
+    random_master_key_t *sc_random_master_key;
     int                 sc_version;
     uint8_t             sc_client_random[SSL3_RANDOM_SIZE];
     uint8_t             sc_server_random[SSL3_RANDOM_SIZE];

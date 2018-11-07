@@ -110,6 +110,15 @@ static ssl_cipher_t ssl_cipher[] = {
         .sp_mac_nid = NID_sha256,
         .sp_md_nid = NID_sha256,
     },
+    {
+        .sp_id = TLS1_CK_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        .sp_algorithm_mkey = SSL_kECDHE,
+        .sp_algorithm_enc = SSL_AES128GCM,
+        .sp_algorithm_mac = SSL_AEAD,
+        .sp_cipher_nid = NID_aes_128_gcm,
+        .sp_mac_nid = NID_sha256,
+        .sp_md_nid = NID_sha256,
+    },
 };
 
 #define SSL_CIPHER_NUM      CT_ARRAY_SIZE(ssl_cipher)
@@ -243,7 +252,7 @@ add_random_masterkey_pair(const char *random, const char *master_key)
     random_master_key_t     *key = NULL;
     static struct list_head *head = NULL;
 
-    printf("add %s--->%s\n", random, master_key);
+    //printf("add %s--->%s\n", random, master_key);
     assert(strlen(random)/2 == SSL3_RANDOM_SIZE);
     assert(strlen(master_key)/2 == SSL_MAX_MASTER_KEY_LENGTH);
     key = calloc(1, sizeof(*key));
